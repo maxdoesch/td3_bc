@@ -35,6 +35,7 @@ class TrainerConfig(draccus.ChoiceRegistry):
     checkpoint_path: str = "./checkpoints"
     experiment_name: Optional[str] = None
 
+    pretrain_path: Optional[str] = None
 
 @TrainerConfig.register_subclass("pretrain")
 @dataclass
@@ -42,13 +43,11 @@ class PretrainConfig(TrainerConfig):
     name: str = "pretrain"
     td3_config: td3_bc.TD3BC_Config = td3_bc.TD3BC_Config()
 
-
 @TrainerConfig.register_subclass("refine")
 @dataclass
 class RefineConfig(TrainerConfig):
     name: str = "refine"
     td3_config: td3_bc.TD3BC_Refine_Config = td3_bc.TD3BC_Refine_Config()
-
 
 @TrainerConfig.register_subclass("online")
 @dataclass
@@ -58,7 +57,6 @@ class OnlineConfig(TrainerConfig):
 
     initial_samples: int = 5000
     expl_noise: float = 0.1
-
 
 class Trainer(ABC):
     def __init__(self, cfg: TrainerConfig, envs: VectorEnv):
@@ -82,20 +80,35 @@ class Trainer(ABC):
         self.buffer = ReplayBuffer(state_dim=state_dim, action_dim=action_dim)
 
         self.experiment_name = self._get_experiment_name()
-        self.checkpoint_dir = self._create_checkpoint_dir(self.experiment_name)
+        self.checkpoint_base_dir = self._create_checkpoint_dir(self.experiment_name)
 
     def _get_experiment_name(self) -> str:
         if self.cfg.experiment_name:
             return self.cfg.experiment_name
 
-        experiment_dirs = [
-            d
+        experiment_info = [
+            (int(m.group(1)), d)
             for d in os.listdir(self.cfg.checkpoint_path)
-            if os.path.isdir(os.path.join(self.cfg.checkpoint_path, d)) and d.startswith("experiment_")
+            if os.path.isdir(os.path.join(self.cfg.checkpoint_path, d)) 
+            and (m := re.match(r"experiment_(\d+)", d))
         ]
 
-        ids = [int(m.group(1)) for d in experiment_dirs if (m := re.match(r"experiment_(\d+)", d))]
-        return f"experiment_{max(ids, default=0) + 1}"
+        experiment_info.sort()
+        last_id = experiment_info[-1][0] if experiment_info else 0
+        last_exp_path = os.path.join(self.cfg.checkpoint_path, experiment_info[-1][1]) if experiment_info else ""
+
+        if self.cfg.name == 'pretrain':
+            return f"experiment_{last_id + 1}"
+        elif self.cfg.name in ('refine', 'online'):
+            subdir = self.cfg.name
+            print(subdir)
+            print(last_exp_path)
+            if last_exp_path and subdir in os.listdir(last_exp_path):
+                return f"experiment_{last_id + 1}"
+            else:
+                return f"experiment_{last_id}"
+
+        return f"experiment_{last_id + 1}"
 
     def _create_checkpoint_dir(self, experiment_name: str) -> str:
         experiment_path = os.path.join(self.cfg.checkpoint_path, experiment_name)
@@ -127,8 +140,14 @@ class Trainer(ABC):
     def train(self):
         print(f"{'-' * 40}")
         print(f"Starting training: Mode={self.cfg.name} | Experiment: {self.experiment_name} | Seed={self.cfg.seed}")
-        print(f"Save run to {self.checkpoint_dir}")
+        print(f"Save run to {self.checkpoint_base_dir}")
         print(f"{'-' * 40}")
+
+        if self.cfg.pretrain_path:
+            if os.path.exists(self.cfg.pretrain_path):
+                self.td3_bc_agent.load(self.cfg.pretrain_path)
+            else:
+                raise ValueError(f'Path: {self.cfg.pretrain_path} is not a valid path.')
 
         run_name = f"{self.experiment_name}_{self.cfg.name}"
         wandb.init(
@@ -150,6 +169,11 @@ class Trainer(ABC):
             if (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1:
                 eval_metrics = self.evaluator.evaluate()
                 wandb.log(eval_metrics, step=i)
+
+                checkpoint_dir = os.path.join(self.checkpoint_base_dir, f'checkpoint_{i+1}')
+                os.makedirs(checkpoint_dir, exist_ok=True)
+
+                self.td3_bc_agent.save(checkpoint_dir)
 
         wandb.finish()
 

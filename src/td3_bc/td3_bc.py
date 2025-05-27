@@ -1,3 +1,4 @@
+import os
 import copy
 import time
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ class TD3BC_Refine_Config(TD3BC_Base_Config):
 
 @dataclass
 class TD3BC_Online_Config(TD3BC_Config):
-    alpha_end = 0.2
+    alpha_end: float = 0.2
 
 
 class BaseAgent(ABC):
@@ -146,7 +147,8 @@ class TD3BC_Base(BaseAgent):
         for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
-    def save(self, file_path: str):
+    def save(self, dir_path: str):
+        file_path = os.path.join(dir_path, 'td3_bc.pt')
         torch.save(
             {
                 "critic_state_dict": self.critic.state_dict(),
@@ -157,7 +159,10 @@ class TD3BC_Base(BaseAgent):
             file_path,
         )
 
-    def load(self, file_path: str):
+        print(f'Model parameters saved to: {file_path}.')
+
+    def load(self, dir_path: str):
+        file_path = os.path.join(dir_path, 'td3_bc.pt')
         checkpoint = torch.load(file_path)
 
         self.critic.load_state_dict(checkpoint["critic_state_dict"])
@@ -168,6 +173,7 @@ class TD3BC_Base(BaseAgent):
         self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
         self.actor_target = copy.deepcopy(self.actor)
 
+        print(f'Model parameters loaded from: {file_path}.')
 
 class TD3BC(TD3BC_Base):
     def __init__(
@@ -249,7 +255,6 @@ class TD3BC_Refine(TD3BC_Base):
         metrics["train/time"] = time.time() - start_time
 
         return metrics
-
 
 class TD3BC_Online(TD3BC):
     def __init__(
