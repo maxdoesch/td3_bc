@@ -43,31 +43,30 @@ class TD3BC_Online_Config(TD3BC_Config):
 
 class BaseAgent(ABC):
     @abstractmethod
-    def select_action(self, state: np.ndarray) -> np.ndarray:
+    def select_action(self, obs: np.ndarray) -> np.ndarray:
         pass
 
-
 class DummyAgent(BaseAgent):
-    def __init__(self, state_dim: int, action_dim: int, max_action: float):
-        self.state_dim = state_dim
+    def __init__(self, obs_dim: int, action_dim: int, max_action: float):
+        self.obs_dim = obs_dim
         self.action_dim = action_dim
         self.max_action = max_action
 
-    def select_action(self, state):
-        assert state.shape[-1] == self.state_dim, "The dimension of state and the internal state_dim do not match."
+    def select_action(self, obs):
+        assert obs.shape[-1] == self.obs_dim, "The dimension of obs and the internal obs_dim do not match."
 
-        return np.random.randn(state.shape[0], self.action_dim) * self.max_action
+        return np.random.randn(obs.shape[0], self.action_dim) * self.max_action
 
 
 class TD3BC_Base(BaseAgent):
     def __init__(
         self,
-        state_dim: int,
+        obs_dim: int,
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Base_Config] = None,
     ):
-        self.actor, self.critic = policies.policy_factory("mlp", state_dim, action_dim, max_action, device)
+        self.actor, self.critic = policies.policy_factory("mlp", obs_dim, action_dim, max_action, device)
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
@@ -83,9 +82,9 @@ class TD3BC_Base(BaseAgent):
         self.alpha = cfg.alpha
 
     @torch.inference_mode
-    def select_action(self, state: np.ndarray) -> np.ndarray:
-        state = torch.tensor(state, dtype=torch.float32).to(device)
-        action = self.actor(state).cpu().numpy()
+    def select_action(self, obs: np.ndarray) -> np.ndarray:
+        obs = torch.tensor(obs, dtype=torch.float32).to(device)
+        action = self.actor(obs).cpu().numpy()
         return action
 
     @abstractmethod
@@ -94,24 +93,24 @@ class TD3BC_Base(BaseAgent):
 
     def update_critic(
         self,
-        state: torch.Tensor,
+        obs: torch.Tensor,
         action: torch.Tensor,
-        next_state: torch.Tensor,
+        next_obs: torch.Tensor,
         reward: torch.Tensor,
         not_done: torch.Tensor,
     ) -> Tuple[float, float, float]:
         with torch.no_grad():
             # Select action according to policy and add clipped noise
             noise = (torch.randn_like(action) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
-            next_action = (self.actor_target(next_state) + noise).clamp(-self.max_action, self.max_action)
+            next_action = (self.actor_target(next_obs) + noise).clamp(-self.max_action, self.max_action)
 
             # Compute the target Q value
-            target_Q1, target_Q2 = self.critic_target(next_state, next_action)
+            target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
             target_Q = torch.min(target_Q1, target_Q2)
             target_Q = reward + not_done * self.discount * target_Q
 
         # Get current Q estimates
-        current_Q1, current_Q2 = self.critic(state, action)
+        current_Q1, current_Q2 = self.critic(obs, action)
 
         # Compute critic loss
         critic_loss = functional.mse_loss(current_Q1, target_Q) + functional.mse_loss(current_Q2, target_Q)
@@ -123,10 +122,10 @@ class TD3BC_Base(BaseAgent):
 
         return critic_loss.item(), current_Q1.mean().item(), current_Q2.mean().item()
 
-    def update_actor(self, state: torch.Tensor, action: torch.Tensor) -> Tuple[np.ndarray, float, float, float]:
+    def update_actor(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[np.ndarray, float, float, float]:
         # Compute actor loss
-        pi = self.actor(state)
-        q1_value = self.critic.q1(state, pi)
+        pi = self.actor(obs)
+        q1_value = self.critic.q1(obs, pi)
         q1_value_norm = q1_value / q1_value.abs().mean().detach()
 
         bc_loss = functional.mse_loss(pi, action)
@@ -178,7 +177,7 @@ class TD3BC_Base(BaseAgent):
 class TD3BC(TD3BC_Base):
     def __init__(
         self,
-        state_dim: int,
+        obs_dim: int,
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Config] = None,
@@ -186,7 +185,7 @@ class TD3BC(TD3BC_Base):
         if cfg is None:
             cfg = TD3BC_Config()
 
-        super().__init__(state_dim=state_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
+        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
 
         self.policy_freq = cfg.policy_freq
 
@@ -208,7 +207,7 @@ class TD3BC(TD3BC_Base):
         actions_taken = None
         # Delayed policy updates
         if self.total_it % self.policy_freq == 0:
-            actions_taken, actor_loss, bc_loss, _ = self.update_actor(batch["state"], batch["action"])
+            actions_taken, actor_loss, bc_loss, _ = self.update_actor(batch["obs"], batch["action"])
 
             metrics["train/actor_loss"] = actor_loss
             metrics["train/bc_loss"] = bc_loss
@@ -226,7 +225,7 @@ class TD3BC(TD3BC_Base):
 class TD3BC_Refine(TD3BC_Base):
     def __init__(
         self,
-        state_dim: int,
+        obs_dim: int,
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Refine_Config] = None,
@@ -234,7 +233,7 @@ class TD3BC_Refine(TD3BC_Base):
         if cfg is None:
             cfg = TD3BC_Refine_Config()
 
-        super().__init__(state_dim=state_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
+        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
 
         self.alpha = self.alpha / cfg.scaling_factor_lambda
 
@@ -243,7 +242,7 @@ class TD3BC_Refine(TD3BC_Base):
         start_time = time.time()
 
         # Only update the policy, not the critic
-        actions_taken, actor_loss, bc_loss, avg_q = self.update_actor(batch["state"], batch["action"])
+        actions_taken, actor_loss, bc_loss, avg_q = self.update_actor(batch["obs"], batch["action"])
         metrics["train/actor_loss"] = actor_loss
         metrics["train/bc_loss"] = bc_loss
         metrics["train/actions_taken"] = actions_taken
@@ -259,7 +258,7 @@ class TD3BC_Refine(TD3BC_Base):
 class TD3BC_Online(TD3BC):
     def __init__(
         self,
-        state_dim: int,
+        obs_dim: int,
         action_dim: int,
         max_action: float,
         train_steps: int,
@@ -268,7 +267,7 @@ class TD3BC_Online(TD3BC):
         if cfg is None:
             cfg = TD3BC_Online_Config()
 
-        super().__init__(state_dim=state_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
+        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
 
         self.alpha_decay_rate = np.exp(np.log(cfg.alpha_end / self.alpha) / train_steps)
 
@@ -283,14 +282,14 @@ class TD3BC_Online(TD3BC):
 
 
 def get_td3_bc_agent(
-    state_dim: int, action_dim: int, max_action: float, train_steps: int, cfg: TD3BC_Base_Config
+    obs_dim: int, action_dim: int, max_action: float, train_steps: int, cfg: TD3BC_Base_Config
 ) -> TD3BC_Base:
     if isinstance(cfg, TD3BC_Config):
-        return TD3BC(state_dim, action_dim, max_action, cfg)
+        return TD3BC(obs_dim, action_dim, max_action, cfg)
     elif isinstance(cfg, TD3BC_Refine_Config):
-        return TD3BC_Refine(state_dim, action_dim, max_action, cfg)
+        return TD3BC_Refine(obs_dim, action_dim, max_action, cfg)
     elif isinstance(cfg, TD3BC_Online_Config):
-        return TD3BC_Online(state_dim, action_dim, max_action, train_steps, cfg)
+        return TD3BC_Online(obs_dim, action_dim, max_action, train_steps, cfg)
     else:
         raise ValueError(f"Unsupported configuration type: {type(cfg)}")
 
@@ -300,9 +299,9 @@ if __name__ == "__main__":
     agent = TD3BC(3, 4, 1.0, cfg)
 
     batch = {
-        "state": torch.randn(32, 3).to(device),
+        "obs": torch.randn(32, 3).to(device),
         "action": torch.randn(32, 4).to(device),
-        "next_state": torch.randn(32, 3).to(device),
+        "next_obs": torch.randn(32, 3).to(device),
         "reward": torch.randn(32, 1).to(device),
         "not_done": torch.ones(32, 1).to(device),
     }

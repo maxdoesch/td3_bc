@@ -1,20 +1,20 @@
-dataset_path: ""
+train_steps: 50000
+eval_freq: 500
+checkpoint_freq: 5000
+eval_episodes: 16
+batch_size: 256
+debug: false
+seed: 42
+wandb_project: pushing_offline_rl
+checkpoint_path: ./checkpoints
 
-trainer_config:
+train_mode: 
   type: refine
-  train_steps: 10000
-  eval_freq: 100
-  eval_episodes: 5
-  batch_size: 256
-  debug: false
-  seed: 42
-  wandb_project: pushing_offline_rl
-  checkpoint_path: ./checkpoints
 
   td3_config:
     discount: 0.99
     tau: 0.005
-    policy_noise: 0.002
+    policy_noise: 0.2
     noise_clip: 0.5
     alpha: 0.4
     actor_lr: 3e-4

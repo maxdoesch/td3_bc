@@ -1,3 +1,5 @@
+import os
+import json
 import numpy as np
 from typing import Dict, List, Optional
 import gymnasium as gym
@@ -6,6 +8,8 @@ from abc import ABC, abstractmethod
 
 import src.td3_bc.td3_bc as td3_bc
 
+def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+    return (array - mean) / (std + eps)
 
 class Metric(ABC):
     def __init__(self, n_envs: int) -> None:
@@ -31,11 +35,11 @@ class Metric(ABC):
 
 class RewardAndLengthMetric(Metric):
     def reset(self) -> None:
-        self.current_rewards: np.ndarray = np.zeros(self.n_envs)
-        self.current_lengths: np.ndarray = np.zeros(self.n_envs, dtype=int)
+        self.current_rewards = np.zeros(self.n_envs)
+        self.current_lengths = np.zeros(self.n_envs, dtype=int)
 
-        self.episode_rewards: List[float] = []
-        self.episode_lengths: List[int] = []
+        self.episode_rewards = []
+        self.episode_lengths = []
 
     def step(self, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
         self.current_rewards += rewards
@@ -63,6 +67,7 @@ class Evaluator:
         envs: VectorEnv,
         agent: td3_bc.BaseAgent,
         n_eval_episodes: int = 10,
+        dataset_statistics_path: Optional[str] = None,
         render: bool = False,
         metric: Optional[Metric] = None,
     ) -> None:
@@ -74,29 +79,42 @@ class Evaluator:
         self.n_envs: int = self.envs.num_envs
         self.metric: Metric = metric or RewardAndLengthMetric(self.n_envs)
 
+        self.obs_mean = np.zeros(envs.single_action_space.shape[0])
+        self.obs_std = np.ones(envs.observation_space.shape[0])
+
+        if dataset_statistics_path and os.path.exists(dataset_statistics_path):
+            with open(dataset_statistics_path, "r") as f:
+                stats = json.load(f)
+            self.obs_mean, self.obs_std = np.array(stats["obs_mean"]), np.array(stats["obs_std"])
+
+            print(f'Loaded dataset_statistics from {dataset_statistics_path}.')
+    
+    def set_obs_statistics(self, obs_mean: np.ndarray, obs_std: np.ndarray):
+        self.obs_mean = obs_mean
+        self.obs_std = obs_std
+
     def evaluate(self) -> Dict[str, float]:
         self.metric.reset()
-        episode_counts: np.ndarray = np.zeros(self.n_envs, dtype=int)
-        episode_targets: np.ndarray = np.array(
+        episode_counts = np.zeros(self.n_envs, dtype=int)
+        episode_targets = np.array(
             [(self.n_eval_episodes + i) // self.n_envs for i in range(self.n_envs)],
             dtype=int,
         )
 
-        observations, _ = self.envs.reset()
+        obs, _ = self.envs.reset()
 
         while (episode_counts < episode_targets).any():
-            actions: np.ndarray = self.agent.select_action(observations)
-            new_observations, rewards, terminated, truncated, infos = self.envs.step(actions)
+            obs = normalize(obs, self.obs_mean, self.obs_std)
+            actions = self.agent.select_action(obs)
+            obs, rewards, terminated, truncated, infos = self.envs.step(actions)
 
-            dones: np.ndarray = np.logical_or(terminated, truncated)
+            dones = np.logical_or(terminated, truncated)
             self.metric.step(rewards, dones, infos)
 
             for i in range(self.n_envs):
                 if dones[i] and episode_counts[i] < episode_targets[i]:
                     episode_counts[i] += 1
                     self.metric.on_episode_end(i)
-
-            observations = new_observations
 
             if self.render:
                 self.envs.render()
