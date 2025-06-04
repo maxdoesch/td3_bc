@@ -79,15 +79,18 @@ class Evaluator:
         self.n_envs: int = self.envs.num_envs
         self.metric: Metric = metric or RewardAndLengthMetric(self.n_envs)
 
-        self.obs_mean = np.zeros(envs.single_action_space.shape[0])
-        self.obs_std = np.ones(envs.observation_space.shape[0])
+        self.obs_mean = np.zeros(envs.single_observation_space.shape[0])
+        self.obs_std = np.ones(envs.single_observation_space.shape[0])
 
-        if dataset_statistics_path and os.path.exists(dataset_statistics_path):
-            with open(dataset_statistics_path, "r") as f:
-                stats = json.load(f)
-            self.obs_mean, self.obs_std = np.array(stats["obs_mean"]), np.array(stats["obs_std"])
+        if dataset_statistics_path:
+            if os.path.exists(dataset_statistics_path):
+                with open(dataset_statistics_path, "r") as f:
+                    stats = json.load(f)
+                self.obs_mean, self.obs_std = np.array(stats["obs_mean"]), np.array(stats["obs_std"])
 
-            print(f'Loaded dataset_statistics from {dataset_statistics_path}.')
+                print(f'Loaded dataset_statistics from {dataset_statistics_path}.')
+            else:
+                raise FileNotFoundError(f"Dataset statistics file not found: {dataset_statistics_path}")
     
     def set_obs_statistics(self, obs_mean: np.ndarray, obs_std: np.ndarray):
         self.obs_mean = obs_mean
@@ -118,6 +121,8 @@ class Evaluator:
 
             if self.render:
                 self.envs.render()
+        
+        self.envs.reset()
 
         return self.metric.compute()
 

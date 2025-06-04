@@ -37,10 +37,22 @@ source .venv/bin/activate
 Launch training using one of the available configuration files:
 
 ```bash
-python main.py --config_path config/config_pretrain.yaml
+python train.py --config_path config/config_pretrain.yaml
 ```
 
-#### 📁 Available Configurations
+### 🧪 Evaluate a Trained Model
+
+To evaluate a model from a specific checkpoint, run:
+
+```bash
+python evaluate.py --checkpoint_path ./<checkpoint_dir>/pretrain --checkpoint <checkpoint_step>
+```
+
+Replace `<checkpoint_dir>` with the path to your saved model directory and `<checkpoint_step>` with the specific checkpoint number (e.g., `100000`).
+
+---
+
+### 📁 Available Configurations
 
 * `config/config_pretrain.yaml` — Pretraining phase (offline)
 * `config/config_refine.yaml` — Refinement phase (fine-tuning)

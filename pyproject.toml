@@ -6,7 +6,8 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "draccus>=0.11.5",
-    "gymnasium[classic-control]>=1.1.1",
+    "gymnasium[classic-control,mujoco]>=1.1.1",
+    "minari[all]>=0.5.3",
     "torch>=2.7.0",
     "tqdm>=4.67.1",
     "wandb>=0.19.11",

@@ -1,5 +1,6 @@
 import os
-import yaml
+import torch
+import numpy as np
 import draccus
 import gymnasium as gym
 from typing import Dict
@@ -9,12 +10,16 @@ from src.td3_bc.trainer import TrainerConfig
 from src.td3_bc.evaluator import Evaluator
 import src.td3_bc.td3_bc as td3_bc
 
+def get_normalized_score(score: np.ndarray, ref_min_score: float, ref_max_score: float) -> np.ndarray:
+    return (score - ref_min_score) / (ref_max_score - ref_min_score)
+
 @dataclass
 class EvalConfig:
     checkpoint_mode_path: str
     checkpoint_step: int
     n_eval_episodes: int = 10
     num_envs: int = 1
+    seed: int = 43
     render: bool = False
 
     def __post_init__(self):
@@ -23,12 +28,11 @@ class EvalConfig:
             self.trainer_config: TrainerConfig = draccus.load(TrainerConfig, f)
 
     @property
-    def checkpoint_path(self):
-        return os.path.join(self.checkpoint_mode_path, f'checkpoint_{self.checkpoint_step}')
-    
-    @property
     def checkpoint_base_path(self):
-        return os.path.dirname(self.checkpoint_mode_path)
+        #remove trailing slash
+        if self.checkpoint_mode_path.endswith('/'):
+            self.checkpoint_mode_path = self.checkpoint_mode_path[:-1]
+        return os.path.dirname(self.checkpoint_mode_path)   
 
 @draccus.wrap()
 def main(cfg: EvalConfig):
@@ -39,16 +43,39 @@ def main(cfg: EvalConfig):
     action_dim = envs.single_action_space.shape[0]
     max_action = envs.single_action_space.high[0]
 
-    agent = td3_bc.get_td3_bc_agent(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, train_steps=cfg.trainer_config.train_steps, cfg=cfg.trainer_config.train_mode.td3_config)
-    agent.load(cfg.checkpoint_path)
+    all_metrics = []
 
-    dataset_statistics_path = os.path.join(cfg.checkpoint_base_path, 'dataset_statistics.json')
+    for i, orig_seed in enumerate(cfg.trainer_config.seeds):
+        seed = cfg.seed + i * 1034
 
-    evaluator = Evaluator(envs, agent, cfg.n_eval_episodes, dataset_statistics_path=dataset_statistics_path, render=cfg.render)
-    metrics = evaluator.evaluate()
+        print(f"{'-' * 40}")
+        print(f'Starting evaluation of checkpoint {cfg.checkpoint_mode_path} with seed {seed}')
 
-    for key, item in metrics.items():
-        print(f'{key}: {item:.2f}')
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        envs.reset(seed=seed)
+
+        agent = td3_bc.get_td3_bc_agent(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, train_steps=cfg.trainer_config.train_steps, cfg=cfg.trainer_config.train_mode.td3_config)
+        checkpoint_path = os.path.join(cfg.checkpoint_mode_path, f'seed_{orig_seed}', f'checkpoint_{cfg.checkpoint_step}')
+        agent.load(checkpoint_path)
+
+        dataset_statistics_path = os.path.join(cfg.checkpoint_base_path, 'dataset_statistics.json')
+        evaluator = Evaluator(envs, agent, cfg.n_eval_episodes, dataset_statistics_path=dataset_statistics_path, render=cfg.render)
+        
+        metrics = evaluator.evaluate()
+        all_metrics.append(metrics)
+
+        print(f"Evaluation results for checkpoint {cfg.checkpoint_mode_path} with seed {seed}:")
+        for key, item in metrics.items():
+            print(f'{key}: {item:.2f}')
+
+    ref_min_score = -20.272305
+    ref_max_score = 3234.3
+    normalized_scores = [get_normalized_score(metric['eval/mean_reward'], ref_min_score, ref_max_score) for metric in all_metrics]
+    mean_normalized_scores = np.mean(normalized_scores)
+    std_normalized_scores = np.std(normalized_scores)
+
+    print(f"Mean normalized score: {mean_normalized_scores:.4f} ± {std_normalized_scores:.4f}")
 
 if __name__ == "__main__":
     main()

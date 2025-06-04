@@ -2,6 +2,7 @@ import os
 import numpy as np
 import torch
 import json
+import minari
 from typing import Dict, Tuple
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -109,15 +110,31 @@ class ReplayBuffer:
         self.not_done = self.not_done[: self.size]
         self.size = self.obs.shape[0]
 
-    def save_statistics(self, path: str):
+    def convert_minari(self, dataset: minari.MinariDataset):
+        assert dataset.observation_space.shape[0] == self.obs.shape[-1], "Observation dimension mismatch."
+        assert dataset.action_space.shape[0] == self.action.shape[-1], "Action dimension mismatch."
+
+        for episode in dataset.iterate_episodes():
+            transition = {
+                "obs": episode.observations[:-1],
+                "action": episode.actions,
+                "next_obs": episode.observations[1:],
+                "reward": episode.rewards,
+                "done": episode.terminations
+            }
+            self.add(**transition)
+
+    def save_statistics(self, stats_path: str):
         """
         Save dataset statistics (mean and standard deviation of observations) to a JSON file.
 
         Args:
-            path (str): Directory path where the statistics file will be saved.
-                        The file will be named 'dataset_statistics.json'.
+            stats_path (str): Directory path or file path to save the statistics JSON file.
         """
-        stats_path = os.path.join(path, "dataset_statistics.json")
+
+        if not stats_path.endswith(".json"):
+            stats_path = os.path.join(stats_path, "dataset_statistics.json")
+            
         stats = {
             "obs_mean": self.obs_mean.tolist(),
             "obs_std": self.obs_std.tolist(),
@@ -125,15 +142,16 @@ class ReplayBuffer:
         with open(stats_path, "w") as f:
             json.dump(stats, f, indent=4)
 
-    def load_statistics(self, path: str) -> Tuple[np.ndarray, np.ndarray]:
+    def load_statistics(self, stats_path: str) -> Tuple[np.ndarray, np.ndarray]:
         """
         Load dataset statistics (mean and standard deviation of observations) from a JSON file
         and set them using `set_dataset_statistics`.
 
         Args:
-            path (str): Directory path from which the statistics file ('dataset_statistics.json') will be loaded.
+            stats_path (str): Directory path or file path to the JSON file containing statistics.
         """
-        stats_path = os.path.join(path, "dataset_statistics.json")
+        if not stats_path.endswith(".json"):
+            stats_path = os.path.join(stats_path, "dataset_statistics.json")
 
         if os.path.exists(stats_path):
             with open(stats_path, "r") as f:

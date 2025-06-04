@@ -1,12 +1,25 @@
-train_steps: 50000
-eval_freq: 500
-checkpoint_freq: 5000
+train_steps: 100000
+eval_freq: 5000
+checkpoint_freq: 10000
 eval_episodes: 16
 batch_size: 256
 debug: false
-seed: 42
+
+seeds: 42
+n_seeds: 5
+
 wandb_project: pushing_offline_rl
-checkpoint_path: ./checkpoints
+
+checkpoint_dir: ./checkpoints
+
+#experiment_name
+pretrain_dir: ./checkpoints/experiment_2/pretrain #<chekpoint_dir>/<experiment_name>/pretrain
+#pretrain_checkpoint
+
+dataset_path: 'mujoco/hopper/medium-v0'
+
+env_name: "Hopper-v5"
+num_envs: 4
 
 train_mode: 
   type: refine
@@ -19,7 +32,4 @@ train_mode:
     alpha: 0.4
     actor_lr: 3e-4
     critic_lr: 3e-4
-    scaling_factor_lambda: 5.0
-
-env_name: "MountainCarContinuous-v0"
-num_envs: 4
+    scaling_factor_lambda: 1.0

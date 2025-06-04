@@ -2,7 +2,8 @@ import os
 import re
 import shutil
 import torch
-from typing import Dict, Optional, Union
+import minari
+from typing import Dict, Optional, Union, List
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -28,15 +29,11 @@ class PretrainConfig(ModeConfig):
     name: str = "pretrain"
     td3_config: td3_bc.TD3BC_Config = td3_bc.TD3BC_Config()
 
-    dataset_path: Optional[str] = None
-
 @ModeConfig.register_subclass("refine")
 @dataclass
 class RefineConfig(ModeConfig):
     name: str = "refine"
     td3_config: td3_bc.TD3BC_Refine_Config = td3_bc.TD3BC_Refine_Config()
-
-    dataset_path: Optional[str] = None
 
 @ModeConfig.register_subclass("online")
 @dataclass
@@ -57,21 +54,83 @@ class TrainerConfig():
     eval_episodes: int = 16
     batch_size: int = 256
     debug: bool = False
-    seed: int = 0
+
+    seeds: Union[List, int] = 0
+    n_seeds: int = 1
 
     wandb_project: str = "pushing_offline_rl"
 
-    checkpoint_path: str = "./checkpoints"
+    checkpoint_dir: str = "./checkpoints"
     experiment_name: Optional[str] = None
 
-    pretrain_path: Optional[str] = None
+    pretrain_dir: Optional[str] = None
+    pretrain_checkpoint: Optional[int] = None
+
+    dataset_path: Optional[str] = None
 
     env_name: Optional[str] = "MountainCarContinuous-v0"
     num_envs: Optional[int] = 1
 
+    @property
+    def dataset_statistics_path(self) -> str:
+        return os.path.join(self.experiment_dir, "dataset_statistics.json")
+
+
+    def _get_last_experiment_id(self) -> int:
+        if not os.path.exists(self.checkpoint_dir):
+            return 0
+
+        experiment_ids = [
+            int(m.group(1))
+            for d in os.listdir(self.checkpoint_dir)
+            if os.path.isdir(os.path.join(self.checkpoint_dir, d)) 
+            and (m := re.match(r"experiment_(\d+)", d))
+        ]
+        return max(experiment_ids, default=0)
+
+    def _set_experiment_name(self):
+        if self.experiment_name:
+            return
+
+        last_id = self._get_last_experiment_id()
+        candidate_id = last_id + 1
+        candidate_name = f"experiment_{candidate_id}"
+
+        # Check if mode-specific subdir already exists in last experiment
+        if self.train_mode.name in ('refine', 'online'):
+            last_exp_dir = os.path.join(self.checkpoint_dir, f"experiment_{last_id}")
+            if os.path.isdir(last_exp_dir) and self.train_mode.name not in os.listdir(last_exp_dir):
+                candidate_name = f"experiment_{last_id}"
+
+        self.experiment_name = candidate_name
+
+    def _create_checkpoint_dir(self):
+        self.experiment_dir = os.path.join(self.checkpoint_dir, self.experiment_name)
+        self.checkpoint_mode_dir = os.path.join(self.experiment_dir, self.train_mode.name)
+
+        if os.path.exists(self.checkpoint_mode_dir):
+            shutil.rmtree(self.checkpoint_mode_dir)
+
+        os.makedirs(self.checkpoint_mode_dir, exist_ok=True)
+
+    def _save_config(self):
+        cfg_path = os.path.join(self.checkpoint_mode_dir, 'config.yaml')
+        with open(cfg_path, 'w') as f:
+            draccus.dump(self, f)
+
+    def __post_init__(self):
+        if isinstance(self.seeds, int):
+            self.seeds = [self.seeds + i * 171 for i in range(self.n_seeds)]
+
+    def initialize_config(self):
+        self._set_experiment_name()
+        self._create_checkpoint_dir()
+        self._save_config()
+    
 class Trainer(ABC):
     def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None):
         self.cfg = cfg
+        self.cfg.initialize_config()
 
         if envs:
             self.envs = envs
@@ -84,63 +143,11 @@ class Trainer(ABC):
         self.action_dim = self.envs.single_action_space.shape[0]
         self.max_action = self.envs.single_action_space.high[0]
 
-        self.agent = td3_bc.get_td3_bc_agent(
-            obs_dim=self.obs_dim,
-            action_dim=self.action_dim,
-            max_action=self.max_action,
-            train_steps=cfg.train_steps,
-            cfg=cfg.train_mode.td3_config,
-        )
+        self.agent: td3_bc.TD3BC_Base = None
 
-        self.evaluator = Evaluator(self.envs, self.agent, self.cfg.eval_episodes)
+        self.evaluator: Evaluator = None
 
-        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
-
-        self.experiment_name = self._get_experiment_name()
-        self.checkpoint_base_dir = self._create_checkpoint_dir(self.experiment_name)
-        self._save_config()
-
-    def _save_config(self):
-        cfg_path = os.path.join(self.checkpoint_base_dir, 'config.yaml')
-        with open(cfg_path, 'w') as f:
-            draccus.dump(self.cfg, f)
-
-    def _get_experiment_name(self) -> str:
-        if self.cfg.experiment_name:
-            return self.cfg.experiment_name
-
-        experiment_info = [
-            (int(m.group(1)), d)
-            for d in os.listdir(self.cfg.checkpoint_path)
-            if os.path.isdir(os.path.join(self.cfg.checkpoint_path, d)) 
-            and (m := re.match(r"experiment_(\d+)", d))
-        ]
-
-        experiment_info.sort()
-        last_id = experiment_info[-1][0] if experiment_info else 0
-        last_exp_path = os.path.join(self.cfg.checkpoint_path, experiment_info[-1][1]) if experiment_info else ""
-
-        if self.cfg.train_mode.name == 'pretrain':
-            return f"experiment_{last_id + 1}"
-        elif self.cfg.train_mode.name in ('refine', 'online'):
-            subdir = self.cfg.train_mode.name
-            if last_exp_path and subdir in os.listdir(last_exp_path):
-                return f"experiment_{last_id + 1}"
-            else:
-                return f"experiment_{last_id}"
-
-        return f"experiment_{last_id + 1}"
-
-    def _create_checkpoint_dir(self, experiment_name: str) -> str:
-        experiment_path = os.path.join(self.cfg.checkpoint_path, experiment_name)
-        checkpoint_dir = os.path.join(experiment_path, self.cfg.train_mode.name)
-
-        if os.path.exists(checkpoint_dir):
-            shutil.rmtree(checkpoint_dir)
-
-        os.makedirs(checkpoint_dir, exist_ok=True)
-
-        return checkpoint_dir
+        self.buffer: ReplayBuffer = None
 
     @abstractmethod
     def get_batch(self, batch_size: int) -> Dict[str, torch.Tensor]:
@@ -157,73 +164,119 @@ class Trainer(ABC):
         Should be implemented in subclasses.
         """
         raise NotImplementedError("Subclasses must implement this method.")
-
-    def train(self):
-        print(f"{'-' * 40}")
-        print(f"Starting training: Mode={self.cfg.train_mode.name} | Experiment: {self.experiment_name} | Seed={self.cfg.seed}")
-        print(f"Save run to {self.checkpoint_base_dir}")
-        print(f"{'-' * 40}")
-
-        if self.cfg.pretrain_path:
-            if os.path.exists(self.cfg.pretrain_path):
-                self.agent.load(self.cfg.pretrain_path)
-            else:
-                raise ValueError(f'Path: {self.cfg.pretrain_path} is not a valid path.')
-
-        run_name = f"{self.experiment_name}_{self.cfg.train_mode.name}"
-        wandb.init(
-            project=self.cfg.wandb_project,
-            group=self.experiment_name,
-            name=run_name,
-            mode="disabled" if self.cfg.debug else "online",
-            config=self.cfg,
+    
+    def _set_seed(self, seed: int):
+        """
+        Set the random seed for reproducibility.
+        """
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        self.envs.reset(seed=seed)
+    
+    def _load_pretrained_agent(self, seed: int):
+        self.agent = td3_bc.get_td3_bc_agent(
+            obs_dim=self.obs_dim,
+            action_dim=self.action_dim,
+            max_action=self.max_action,
+            train_steps=self.cfg.train_steps,
+            cfg=self.cfg.train_mode.td3_config,
         )
 
-        self.initialize_replay_buffer()
+        pretrain_path = None
+        if self.cfg.pretrain_dir:
+            if self.cfg.pretrain_checkpoint:
+                pretrain_path = os.path.join(
+                    self.cfg.pretrain_dir, f'seed_{seed}', f'checkpoint_{self.cfg.pretrain_checkpoint}'
+                )
+            else:
+                pretrain_path = os.path.join(
+                    self.cfg.pretrain_dir, f'seed_{seed}', 'checkpoint_latest'
+                )
 
-        for i in tqdm(range(self.cfg.train_steps), desc="Training Steps"):
-            batch = self.get_batch(self.cfg.batch_size)
-            metrics = self.agent.train_step(batch)
+            if os.path.exists(pretrain_path):
+                self.agent.load(pretrain_path)
+            else:
+                raise ValueError(f'Invalid pretrain path: {pretrain_path}')
 
-            wandb.log(metrics, step=i)
+    def train(self):
+        for seed in self.cfg.seeds:
+            print(f"{'-' * 40}")
+            print(f"Starting training: Mode={self.cfg.train_mode.name} | Experiment: {self.cfg.experiment_name} | Seed={seed}")
+            print(f"Save run to {self.cfg.checkpoint_mode_dir}")
+            print(f"{'-' * 40}")
+            
+            group_name = f"{self.cfg.experiment_name}_{self.cfg.train_mode.name}"
+            run_name = f"{group_name}_seed_{seed}"
+            wandb.init(
+                project=self.cfg.wandb_project,
+                group=group_name,
+                name=run_name,
+                mode="disabled" if self.cfg.debug else "online",
+                config=self.cfg,
+            )
 
-            if (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1:
-                eval_metrics = self.evaluator.evaluate()
-                wandb.log(eval_metrics, step=i)
+            self._set_seed(seed)
 
-            if (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1:
-                checkpoint_dir = os.path.join(self.checkpoint_base_dir, f'checkpoint_{i+1}')
-                os.makedirs(checkpoint_dir, exist_ok=True)
+            self.initialize_replay_buffer()
+            self.buffer.save_statistics(self.cfg.dataset_statistics_path)
 
-                self.agent.save(checkpoint_dir)
+            self._load_pretrained_agent(seed)
 
+            self.evaluator = Evaluator(
+                self.envs,
+                self.agent,
+                n_eval_episodes=self.cfg.eval_episodes,
+                dataset_statistics_path=self.cfg.dataset_statistics_path,
+                render=False,
+            )
 
-        wandb.finish()
+            for i in tqdm(range(self.cfg.train_steps), desc="Training Steps"):
+                batch = self.get_batch(self.cfg.batch_size)
+                metrics = self.agent.train_step(batch)
+
+                wandb.log(metrics, step=i)
+
+                if (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0:
+                    eval_metrics = self.evaluator.evaluate()
+                    wandb.log(eval_metrics, step=i)
+
+                if (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1:
+                    checkpoint_dir = os.path.join(self.cfg.checkpoint_mode_dir, f'seed_{seed}', f'checkpoint_{i+1}')
+                    os.makedirs(checkpoint_dir, exist_ok=True)
+                    self.agent.save(checkpoint_dir)
+
+                    latest_checkpoint = os.path.join(self.cfg.checkpoint_mode_dir, f'seed_{seed}', 'checkpoint_latest')
+                    os.makedirs(latest_checkpoint, exist_ok=True)
+                    self.agent.save(latest_checkpoint)
+
+            wandb.finish()
 
 class OfflineTrainer(Trainer):
-    def __init__(self, cfg: TrainerConfig, dataset: Dict, envs: Optional[VectorEnv] = None):
+    def __init__(self, cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None):
         super().__init__(cfg, envs)
 
-        if dataset:
-            self.buffer.convert_dict(dataset)
-        elif self.cfg.train_mode.dataset_path:
-            if os.path.exists(self.cfg.train_mode.dataset_path):
+        self.dataset = dataset
+
+    def _fill_replay_buffer(self):
+        if self.dataset:
+            self.buffer.convert_dict(self.dataset)
+        elif self.cfg.dataset_path:
+            if os.path.exists(self.cfg.dataset_path):
                 raise NotImplementedError("load from file")
-            else: 
-                raise NotImplementedError("load from minari")
+            else:     
+                dataset = minari.load_dataset(self.cfg.dataset_path, download=True)
+                self.buffer.convert_minari(dataset)
         else:
-            raise ValueError(f"Dataset must be provided for offline training mode '{cfg.name}'.")
+            raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
     def initialize_replay_buffer(self):
+        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self._fill_replay_buffer()
+
         obs_mean, obs_std = self.buffer.compute_dataset_statistics()
         self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
 
-        experiment_path = os.path.join(self.cfg.checkpoint_path, self.experiment_name)
-        self.buffer.save_statistics(path=experiment_path)
-
-        self.evaluator.set_obs_statistics(obs_mean, obs_std)
-
-        print(f"Observations normalized and dataset statistics saved to {experiment_path}")
+        print(f"Observations normalized and dataset statistics saved to {self.cfg.experiment_dir}")
 
     def get_batch(self, batch_size: int) -> Dict[str, torch.Tensor]:
         return self.buffer.sample(batch_size)
@@ -252,7 +305,7 @@ class OnlineTrainer(Trainer):
 
         return dones
 
-    def fill_replay_buffer(self):
+    def _fill_replay_buffer(self):
         print(f'Filling replay buffer with {self.cfg.train_mode.warmup_episodes} warmup episodes.')
         n_envs = self.envs.num_envs
 
@@ -272,19 +325,18 @@ class OnlineTrainer(Trainer):
             episode_counts[mask] += 1
 
     def initialize_replay_buffer(self):
-        experiment_path = os.path.join(self.cfg.checkpoint_path, self.experiment_name)
-        obs_mean, obs_std = self.buffer.load_statistics(path=experiment_path)
+        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
 
-        self.evaluator.set_obs_statistics(obs_mean, obs_std)
+        self.buffer.load_statistics(self.cfg.dataset_statistics_path)
 
-        self.fill_replay_buffer()
+        self._fill_replay_buffer()
 
     def get_batch(self, batch_size: int) -> Dict[str, torch.Tensor]:
         self.step_and_add()
 
         return self.buffer.sample(batch_size)
 
-def get_trainer(cfg: TrainerConfig, dataset: Dict, envs: Optional[VectorEnv] = None) -> Trainer:
+def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None) -> Trainer:
     trainer_map = {
         "pretrain": OfflineTrainer,
         "refine": OfflineTrainer,
