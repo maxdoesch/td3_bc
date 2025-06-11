@@ -1,12 +1,24 @@
-train_steps: 50000
-eval_freq: 500
-checkpoint_freq: 5000
-eval_episodes: 16
+train_steps: 100000
+eval_freq: 5000
+checkpoint_freq: 25000
+eval_episodes: 32
 batch_size: 256
 debug: false
-seed: 42
+
+seeds: 42
+n_seeds: 5
+
 wandb_project: pushing_offline_rl
-checkpoint_path: ./checkpoints
+checkpoint_dir: ./checkpoints
+
+experiment_name: 'experiment_6_1'
+pretrain_dir: /home/max/clean_td3_bc/checkpoints/experiment_6/refine
+#pretrain_checkpoint: 130000
+
+#dataset_path
+
+env_name: "Hopper-v5"
+num_envs: 8
 
 train_mode: 
   type: online
@@ -22,8 +34,5 @@ train_mode:
     policy_freq: 2
     alpha_end: 0.2
 
-  warmup_episodes: 16
+  warmup_steps: 25000
   expl_noise: 0.1
-
-env_name: "MountainCarContinuous-v0"
-num_envs: 4

@@ -1,6 +1,7 @@
 import os
 import json
 import numpy as np
+import logging
 from typing import Dict, List, Optional
 import gymnasium as gym
 from gymnasium.vector import VectorEnv
@@ -88,7 +89,7 @@ class Evaluator:
                     stats = json.load(f)
                 self.obs_mean, self.obs_std = np.array(stats["obs_mean"]), np.array(stats["obs_std"])
 
-                print(f'Loaded dataset_statistics from {dataset_statistics_path}.')
+                logging.info(f'Loaded dataset_statistics from {dataset_statistics_path}.')
             else:
                 raise FileNotFoundError(f"Dataset statistics file not found: {dataset_statistics_path}")
     

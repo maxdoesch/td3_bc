@@ -1,6 +1,7 @@
 import os
 import copy
 import time
+import logging
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Tuple
@@ -18,7 +19,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class TD3BC_Base_Config:
     discount: float = 0.99
     tau: float = 0.005
-    policy_noise: float = 0.002
+    policy_noise: float = 0.2
     noise_clip: float = 0.5
     alpha: float = 0.4
 
@@ -158,7 +159,7 @@ class TD3BC_Base(BaseAgent):
             file_path,
         )
 
-        print(f'Model parameters saved to: {file_path}.')
+        logging.debug(f'Model parameters saved to: {file_path}.')
 
     def load(self, dir_path: str):
         file_path = os.path.join(dir_path, 'td3_bc.pt')
@@ -172,7 +173,7 @@ class TD3BC_Base(BaseAgent):
         self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
         self.actor_target = copy.deepcopy(self.actor)
 
-        print(f'Model parameters loaded from: {file_path}.')
+        logging.debug(f'Model parameters loaded from: {file_path}.')
 
 class TD3BC(TD3BC_Base):
     def __init__(
@@ -284,11 +285,11 @@ class TD3BC_Online(TD3BC):
 def get_td3_bc_agent(
     obs_dim: int, action_dim: int, max_action: float, train_steps: int, cfg: TD3BC_Base_Config
 ) -> TD3BC_Base:
-    if isinstance(cfg, TD3BC_Config):
+    if type(cfg) is TD3BC_Config:
         return TD3BC(obs_dim, action_dim, max_action, cfg)
-    elif isinstance(cfg, TD3BC_Refine_Config):
+    elif type(cfg) is TD3BC_Refine_Config:
         return TD3BC_Refine(obs_dim, action_dim, max_action, cfg)
-    elif isinstance(cfg, TD3BC_Online_Config):
+    elif type(cfg) is TD3BC_Online_Config:
         return TD3BC_Online(obs_dim, action_dim, max_action, train_steps, cfg)
     else:
         raise ValueError(f"Unsupported configuration type: {type(cfg)}")

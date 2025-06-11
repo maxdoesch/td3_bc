@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import torch
+import logging
 import minari
 from typing import Dict, Optional, Union, List
 from abc import ABC, abstractmethod
@@ -41,7 +42,7 @@ class OnlineConfig(ModeConfig):
     name: str = "online"
     td3_config: td3_bc.TD3BC_Online_Config = td3_bc.TD3BC_Online_Config()
 
-    warmup_episodes: int = 5000
+    warmup_steps: int = 5000
     expl_noise: float = 0.1
 
 @dataclass
@@ -68,7 +69,7 @@ class TrainerConfig():
 
     dataset_path: Optional[str] = None
 
-    env_name: Optional[str] = "MountainCarContinuous-v0"
+    env_name: Optional[str] = None
     num_envs: Optional[int] = 1
 
     @property
@@ -127,6 +128,9 @@ class TrainerConfig():
         self._create_checkpoint_dir()
         self._save_config()
     
+def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5):
+    return (array - mean) / (std + eps)
+
 class Trainer(ABC):
     def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None):
         self.cfg = cfg
@@ -173,7 +177,7 @@ class Trainer(ABC):
         np.random.seed(seed)
         self.envs.reset(seed=seed)
     
-    def _load_pretrained_agent(self, seed: int):
+    def _load_agent(self, seed: int):
         self.agent = td3_bc.get_td3_bc_agent(
             obs_dim=self.obs_dim,
             action_dim=self.action_dim,
@@ -195,15 +199,18 @@ class Trainer(ABC):
 
             if os.path.exists(pretrain_path):
                 self.agent.load(pretrain_path)
+                logging.info(f"Loaded pretrained agent from {pretrain_path}")
             else:
                 raise ValueError(f'Invalid pretrain path: {pretrain_path}')
+        else:
+            logging.info("No pretraining directory specified, starting from scratch.")
 
     def train(self):
         for seed in self.cfg.seeds:
-            print(f"{'-' * 40}")
-            print(f"Starting training: Mode={self.cfg.train_mode.name} | Experiment: {self.cfg.experiment_name} | Seed={seed}")
-            print(f"Save run to {self.cfg.checkpoint_mode_dir}")
-            print(f"{'-' * 40}")
+            logging.info(f"{'-' * 40}")
+            logging.info(f"Starting training: Mode={self.cfg.train_mode.name} | Experiment: {self.cfg.experiment_name} | Seed={seed}")
+            logging.info(f"Save run to {self.cfg.checkpoint_mode_dir}")
+            logging.info(f"{'-' * 40}")
             
             group_name = f"{self.cfg.experiment_name}_{self.cfg.train_mode.name}"
             run_name = f"{group_name}_seed_{seed}"
@@ -217,10 +224,9 @@ class Trainer(ABC):
 
             self._set_seed(seed)
 
-            self.initialize_replay_buffer()
-            self.buffer.save_statistics(self.cfg.dataset_statistics_path)
+            self._load_agent(seed)
 
-            self._load_pretrained_agent(seed)
+            self.initialize_replay_buffer()
 
             self.evaluator = Evaluator(
                 self.envs,
@@ -260,12 +266,14 @@ class OfflineTrainer(Trainer):
     def _fill_replay_buffer(self):
         if self.dataset:
             self.buffer.convert_dict(self.dataset)
+            logging.info(f"Replay buffer filled with transitions from provided dict dataset.")
         elif self.cfg.dataset_path:
             if os.path.exists(self.cfg.dataset_path):
                 raise NotImplementedError("load from file")
             else:     
                 dataset = minari.load_dataset(self.cfg.dataset_path, download=True)
                 self.buffer.convert_minari(dataset)
+                logging.info(f"Replay buffer filled with transitions from Minari dataset at {self.cfg.dataset_path}.")
         else:
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
@@ -276,7 +284,9 @@ class OfflineTrainer(Trainer):
         obs_mean, obs_std = self.buffer.compute_dataset_statistics()
         self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
 
-        print(f"Observations normalized and dataset statistics saved to {self.cfg.experiment_dir}")
+        self.buffer.save_statistics(self.cfg.dataset_statistics_path)
+
+        logging.info(f"Observations normalized and dataset statistics saved to {self.cfg.experiment_dir}")
 
     def get_batch(self, batch_size: int) -> Dict[str, torch.Tensor]:
         return self.buffer.sample(batch_size)
@@ -288,9 +298,15 @@ class OnlineTrainer(Trainer):
         self.obs = np.zeros((self.envs.num_envs, self.obs_dim))
         self.episode_starts = np.ones(self.envs.num_envs, dtype=np.bool)
 
+        self.obs_mean = np.zeros(self.obs_dim)
+        self.obs_std = np.ones(self.obs_dim)
+
     def step_and_add(self) -> np.ndarray:
+
+        norm_obs = normalize(self.obs, self.obs_mean, self.obs_std)
+
         actions = (
-            self.agent.select_action(self.obs) + 
+            self.agent.select_action(norm_obs) + 
             np.random.normal(0, self.cfg.train_mode.expl_noise, size=self.action_dim)
         ).clip(-self.max_action, self.max_action)
 
@@ -306,30 +322,34 @@ class OnlineTrainer(Trainer):
         return dones
 
     def _fill_replay_buffer(self):
-        print(f'Filling replay buffer with {self.cfg.train_mode.warmup_episodes} warmup episodes.')
+        logging.info(f'Filling replay buffer with {self.cfg.train_mode.warmup_steps} warmup steps.')
         n_envs = self.envs.num_envs
 
-        episode_counts = np.zeros(n_envs, dtype=int)
-        episode_targets = np.array(
-            [(self.cfg.train_mode.warmup_episodes + i) // n_envs for i in range(n_envs)],
-            dtype=int,
-        )
-
         self.obs, _ = self.envs.reset()
-        self.episode_starts = np.zeros(self.envs.num_envs, dtype=np.bool)
+        self.episode_starts = np.zeros(n_envs, dtype=np.bool)
 
-        while (episode_counts < episode_targets).any():
-            dones = self.step_and_add()
+        for _ in range(0, self.cfg.train_mode.warmup_steps, n_envs):
+            self.step_and_add()
 
-            mask = dones & (episode_counts < episode_targets)
-            episode_counts[mask] += 1
+        self.envs.reset()
+        self.episode_starts = np.zeros(n_envs, dtype=np.bool)
 
     def initialize_replay_buffer(self):
         self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
 
+        if self.cfg.pretrain_dir.endswith('/'):
+            self.cfg.pretrain_dir = self.cfg.pretrain_dir[:-1]
+
+        pretrain_dataset_statistics_path = os.path.join(os.path.dirname(self.cfg.pretrain_dir), 'dataset_statistics.json')
+        if not os.path.exists(self.cfg.dataset_statistics_path):
+            shutil.copyfile(pretrain_dataset_statistics_path, self.cfg.dataset_statistics_path)
         self.buffer.load_statistics(self.cfg.dataset_statistics_path)
 
+        self.obs_mean, self.obs_std = self.buffer.get_dataset_statistics()
+
         self._fill_replay_buffer()
+
+        logging.info(f'Loaded dataset statistics from {self.cfg.dataset_statistics_path} and filled replay buffer with {self.cfg.train_mode.warmup_steps} warmup steps.')
 
     def get_batch(self, batch_size: int) -> Dict[str, torch.Tensor]:
         self.step_and_add()

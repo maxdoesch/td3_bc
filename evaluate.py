@@ -68,12 +68,21 @@ def main(cfg: EvalConfig):
         print(f"Evaluation results for checkpoint {cfg.checkpoint_mode_path} with seed {seed}:")
         for key, item in metrics.items():
             print(f'{key}: {item:.2f}')
-
+    #hopper
     ref_min_score = -20.272305
     ref_max_score = 3234.3
-    normalized_scores = [get_normalized_score(metric['eval/mean_reward'], ref_min_score, ref_max_score) for metric in all_metrics]
+
+    #halfcheetah
+    #ref_min_score = -280.178953
+    #ref_max_score = 12135.0
+    normalized_scores = np.array([get_normalized_score(metric['eval/mean_reward'], ref_min_score, ref_max_score) for metric in all_metrics])
+    normalized_stds = np.array([get_normalized_score(metric['eval/std_reward'], ref_min_score, ref_max_score) for metric in all_metrics])
+
     mean_normalized_scores = np.mean(normalized_scores)
-    std_normalized_scores = np.std(normalized_scores)
+
+    print(normalized_stds)
+    print((normalized_scores - mean_normalized_scores)**2)
+    std_normalized_scores = np.sqrt(np.mean(normalized_stds**2 + (normalized_scores - mean_normalized_scores)**2))
 
     print(f"Mean normalized score: {mean_normalized_scores:.4f} ± {std_normalized_scores:.4f}")
 

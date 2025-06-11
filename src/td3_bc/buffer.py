@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import json
 import minari
+import logging
 from typing import Dict, Tuple
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -103,12 +104,11 @@ class ReplayBuffer:
 
             self.add(**transition)
 
-        self.obs = self.obs[: self.size]
-        self.action = self.action[: self.size]
-        self.reward = self.reward[: self.size]
-        self.next_obs = self.next_obs[: self.size]
-        self.not_done = self.not_done[: self.size]
-        self.size = self.obs.shape[0]
+        self.obs = self.obs[:self.size]
+        self.action = self.action[:self.size]
+        self.reward = self.reward[:self.size]
+        self.next_obs = self.next_obs[:self.size]
+        self.not_done = self.not_done[:self.size]
 
     def convert_minari(self, dataset: minari.MinariDataset):
         assert dataset.observation_space.shape[0] == self.obs.shape[-1], "Observation dimension mismatch."
@@ -123,6 +123,12 @@ class ReplayBuffer:
                 "done": episode.terminations
             }
             self.add(**transition)
+
+        self.obs = self.obs[:self.size]
+        self.action = self.action[:self.size]
+        self.reward = self.reward[:self.size]
+        self.next_obs = self.next_obs[:self.size]
+        self.not_done = self.not_done[:self.size]
 
     def save_statistics(self, stats_path: str):
         """
@@ -160,7 +166,7 @@ class ReplayBuffer:
             obs_std = np.array(stats["obs_std"])
             self.set_dataset_statistics(np.array(stats["obs_mean"]), np.array(stats["obs_std"]))
         else:
-            print(f"Dataset statistics not found at {stats_path}. Replay buffer will not be normalized.")
+            logging.warning(f"Dataset statistics not found at {stats_path}. Replay buffer will not be normalized.")
 
         return obs_mean, obs_std
 
@@ -173,8 +179,8 @@ class ReplayBuffer:
                 - obs_mean (np.ndarray): The mean of the observations.
                 - obs_std (np.ndarray): The standard deviation of the observations.
         """
-        obs_mean = np.mean(self.obs, axis=0, keepdims=True)
-        obs_std = np.std(self.obs, axis=0, keepdims=True)
+        obs_mean = np.mean(self.obs[:self.size], axis=0, keepdims=True)
+        obs_std = np.std(self.obs[:self.size], axis=0, keepdims=True)
 
         return obs_mean, obs_std
 
@@ -189,8 +195,19 @@ class ReplayBuffer:
         self.obs_mean = obs_mean
         self.obs_std = obs_std
 
-        self.obs = normalize(self.obs, self.obs_mean, self.obs_std)
-        self.next_obs = normalize(self.next_obs, self.obs_mean, self.obs_std)
+        self.obs[:self.size] = normalize(self.obs[:self.size], self.obs_mean, self.obs_std)
+        self.next_obs[:self.size] = normalize(self.next_obs[:self.size], self.obs_mean, self.obs_std)
+
+    def get_dataset_statistics(self) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Get the current dataset statistics (mean and standard deviation).
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: A tuple containing:
+                - obs_mean (np.ndarray): The mean of the observations.
+                - obs_std (np.ndarray): The standard deviation of the observations.
+        """
+        return self.obs_mean, self.obs_std
 
 if __name__ == "__main__":
     # Example usage
