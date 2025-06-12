@@ -1,7 +1,7 @@
-train_steps: 250000
+train_steps: 1000000
 eval_freq: 5000
+eval_episodes: 10
 checkpoint_freq: 25000
-eval_episodes: 32
 batch_size: 256
 debug: false
 
@@ -11,13 +11,10 @@ n_seeds: 5
 wandb_project: td3-bc
 checkpoint_dir: ./checkpoints
 
-experiment_name: 'experiment_5_1'
-pretrain_dir: /home/max/clean_td3_bc/checkpoints/experiment_5_1/refine
-#pretrain_checkpoint: 130000
+#experiment_name: <optional> 
+#pretrain_dir: <pretrain_dir>
 
-#dataset_path
-
-env_name: "Hopper-v5"
+env_name: "HalfCheetah-v5"
 num_envs: 8
 
 train_mode: 

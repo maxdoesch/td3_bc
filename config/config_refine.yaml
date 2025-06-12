@@ -1,7 +1,7 @@
-train_steps: 500000
-eval_freq: 10000
+train_steps: 1000000
+eval_freq: 5000
+eval_episodes: 10
 checkpoint_freq: 25000
-eval_episodes: 32
 batch_size: 256
 debug: false
 
@@ -9,14 +9,12 @@ seeds: 42
 n_seeds: 5
 
 wandb_project: td3-bc
-
 checkpoint_dir: ./checkpoints
 
-experiment_name: 'experiment_10'
-pretrain_dir: ./checkpoints/experiment_8/pretrain #<checkpoint_dir>/<experiment_name>/pretrain
-#pretrain_checkpoint
+#experiment_name: <optional>
+#pretrain_dir: <pretrain_dir>
 
-dataset_path: 'mujoco/halfcheetah/medium-v0'
+dataset_path: 'mujoco/halfcheetah/simple-v0'
 
 env_name: "HalfCheetah-v5"
 num_envs: 4
