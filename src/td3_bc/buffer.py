@@ -4,18 +4,20 @@ import torch
 import json
 import minari
 import logging
-from typing import Dict, Tuple
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from typing import Dict, Tuple, Optional
 
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5):
     return (array - mean) / (std + eps)
 
 class ReplayBuffer:
-    def __init__(self, obs_dim: int, action_dim: int, max_size: int = int(1e7)):
+    def __init__(self, obs_dim: int, action_dim: int, max_size: int = int(1e7), device: Optional[str] = None):
         self.max_size = max_size
         self.ptr = 0
         self.size = 0
+
+        if device is None:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = device
 
         self.obs = np.zeros((max_size, obs_dim))
         self.action = np.zeros((max_size, action_dim))
@@ -82,11 +84,11 @@ class ReplayBuffer:
         idx = np.random.randint(0, self.size, size=batch_size)
 
         return {
-            "obs": torch.FloatTensor(self.obs[idx]).to(device),
-            "action": torch.FloatTensor(self.action[idx]).to(device),
-            "next_obs": torch.FloatTensor(self.next_obs[idx]).to(device),
-            "reward": torch.FloatTensor(self.reward[idx]).to(device),
-            "not_done": torch.FloatTensor(self.not_done[idx]).to(device),
+            "obs": torch.FloatTensor(self.obs[idx]).to(self.device),
+            "action": torch.FloatTensor(self.action[idx]).to(self.device),
+            "next_obs": torch.FloatTensor(self.next_obs[idx]).to(self.device),
+            "reward": torch.FloatTensor(self.reward[idx]).to(self.device),
+            "not_done": torch.FloatTensor(self.not_done[idx]).to(self.device),
         }
 
     def convert_dict(self, dict_dataset):

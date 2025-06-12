@@ -56,6 +56,8 @@ class TrainerConfig():
     batch_size: int = 256
     debug: bool = False
 
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
     seeds: Union[List, int] = 0
     n_seeds: int = 1
 
@@ -184,6 +186,7 @@ class Trainer(ABC):
             max_action=self.max_action,
             train_steps=self.cfg.train_steps,
             cfg=self.cfg.train_mode.td3_config,
+            device=self.cfg.device,
         )
 
         pretrain_path = None
@@ -208,7 +211,7 @@ class Trainer(ABC):
     def train(self):
         for seed in self.cfg.seeds:
             logging.info(f"{'-' * 40}")
-            logging.info(f"Starting training: Mode={self.cfg.train_mode.name} | Experiment: {self.cfg.experiment_name} | Seed={seed}")
+            logging.info(f"Starting training: Mode={self.cfg.train_mode.name} | Experiment: {self.cfg.experiment_name} | Seed={seed} | Device={self.cfg.device}")
             logging.info(f"Save run to {self.cfg.checkpoint_mode_dir}")
             logging.info(f"{'-' * 40}")
             
@@ -278,7 +281,7 @@ class OfflineTrainer(Trainer):
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim, device=self.cfg.device)
         self._fill_replay_buffer()
 
         obs_mean, obs_std = self.buffer.compute_dataset_statistics()
@@ -335,7 +338,7 @@ class OnlineTrainer(Trainer):
         self.episode_starts = np.zeros(n_envs, dtype=np.bool)
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim)
+        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim, device=self.cfg.device)
 
         if self.cfg.pretrain_dir.endswith('/'):
             self.cfg.pretrain_dir = self.cfg.pretrain_dir[:-1]

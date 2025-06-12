@@ -12,9 +12,6 @@ from torch.nn import functional
 
 import src.td3_bc.policies as policies
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
 @dataclass
 class TD3BC_Base_Config:
     discount: float = 0.99
@@ -66,8 +63,13 @@ class TD3BC_Base(BaseAgent):
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Base_Config] = None,
+        device: Optional[str] = None,
     ):
-        self.actor, self.critic = policies.policy_factory("mlp", obs_dim, action_dim, max_action, device)
+        if device is None:
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = device
+
+        self.actor, self.critic = policies.policy_factory("mlp", obs_dim, action_dim, max_action, self.device)
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
@@ -84,7 +86,7 @@ class TD3BC_Base(BaseAgent):
 
     @torch.inference_mode
     def select_action(self, obs: np.ndarray) -> np.ndarray:
-        obs = torch.tensor(obs, dtype=torch.float32).to(device)
+        obs = torch.tensor(obs, dtype=torch.float32).to(self.device)
         action = self.actor(obs).cpu().numpy()
         return action
 
@@ -182,11 +184,12 @@ class TD3BC(TD3BC_Base):
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Config] = None,
+        device: Optional[str] = None,
     ):
         if cfg is None:
             cfg = TD3BC_Config()
 
-        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
+        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
 
         self.policy_freq = cfg.policy_freq
 
@@ -230,11 +233,12 @@ class TD3BC_Refine(TD3BC_Base):
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Refine_Config] = None,
+        device: Optional[str] = None,
     ):
         if cfg is None:
             cfg = TD3BC_Refine_Config()
 
-        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
+        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
 
         self.alpha = self.alpha / cfg.scaling_factor_lambda
 
@@ -264,11 +268,12 @@ class TD3BC_Online(TD3BC):
         max_action: float,
         train_steps: int,
         cfg: Optional[TD3BC_Online_Config] = None,
+        device: Optional[str] = None,
     ):
         if cfg is None:
             cfg = TD3BC_Online_Config()
 
-        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg)
+        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
 
         self.alpha_decay_rate = np.exp(np.log(cfg.alpha_end / self.alpha) / train_steps)
 
@@ -283,14 +288,14 @@ class TD3BC_Online(TD3BC):
 
 
 def get_td3_bc_agent(
-    obs_dim: int, action_dim: int, max_action: float, train_steps: int, cfg: TD3BC_Base_Config
+    obs_dim: int, action_dim: int, max_action: float, train_steps: int, cfg: TD3BC_Base_Config, device: str
 ) -> TD3BC_Base:
     if type(cfg) is TD3BC_Config:
-        return TD3BC(obs_dim, action_dim, max_action, cfg)
+        return TD3BC(obs_dim, action_dim, max_action, cfg, device)
     elif type(cfg) is TD3BC_Refine_Config:
-        return TD3BC_Refine(obs_dim, action_dim, max_action, cfg)
+        return TD3BC_Refine(obs_dim, action_dim, max_action, cfg, device)
     elif type(cfg) is TD3BC_Online_Config:
-        return TD3BC_Online(obs_dim, action_dim, max_action, train_steps, cfg)
+        return TD3BC_Online(obs_dim, action_dim, max_action, train_steps, cfg, device)
     else:
         raise ValueError(f"Unsupported configuration type: {type(cfg)}")
 
@@ -298,6 +303,8 @@ def get_td3_bc_agent(
 if __name__ == "__main__":
     cfg = TD3BC_Config()
     agent = TD3BC(3, 4, 1.0, cfg)
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     batch = {
         "obs": torch.randn(32, 3).to(device),

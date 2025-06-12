@@ -1,4 +1,4 @@
-train_steps: 100000
+train_steps: 250000
 eval_freq: 5000
 checkpoint_freq: 25000
 eval_episodes: 32
@@ -11,8 +11,8 @@ n_seeds: 5
 wandb_project: pushing_offline_rl
 checkpoint_dir: ./checkpoints
 
-experiment_name: 'experiment_6_1'
-pretrain_dir: /home/max/clean_td3_bc/checkpoints/experiment_6/refine
+experiment_name: 'experiment_5_1'
+pretrain_dir: /home/max/clean_td3_bc/checkpoints/experiment_5_1/refine
 #pretrain_checkpoint: 130000
 
 #dataset_path
