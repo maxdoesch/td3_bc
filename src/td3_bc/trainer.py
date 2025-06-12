@@ -221,7 +221,7 @@ class Trainer(ABC):
                 project=self.cfg.wandb_project,
                 group=group_name,
                 name=run_name,
-                tags=[self.cfg.env_name],
+                tags=[self.cfg.env_name, self.cfg.dataset_path],
                 mode="disabled" if self.cfg.debug else "online",
                 config=self.cfg,
             )

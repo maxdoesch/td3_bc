@@ -15,7 +15,7 @@ checkpoint_dir: ./checkpoints
 #pretrain_dir: <pretrain_dir>
 
 env_name: "HalfCheetah-v5"
-num_envs: 8
+num_envs: 4
 
 train_mode: 
   type: online
