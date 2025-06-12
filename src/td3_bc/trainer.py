@@ -61,7 +61,7 @@ class TrainerConfig():
     seeds: Union[List, int] = 0
     n_seeds: int = 1
 
-    wandb_project: str = "pushing_offline_rl"
+    wandb_project: str = "td3_bc"
 
     checkpoint_dir: str = "./checkpoints"
     experiment_name: Optional[str] = None
@@ -78,32 +78,32 @@ class TrainerConfig():
     def dataset_statistics_path(self) -> str:
         return os.path.join(self.experiment_dir, "dataset_statistics.json")
 
-
     def _get_last_experiment_id(self) -> int:
         if not os.path.exists(self.checkpoint_dir):
-            return 0
+            return -1  # so first experiment will be 0
 
+        prefix = self.env_name.lower() if self.env_name else "experiment"
         experiment_ids = [
             int(m.group(1))
             for d in os.listdir(self.checkpoint_dir)
             if os.path.isdir(os.path.join(self.checkpoint_dir, d)) 
-            and (m := re.match(r"experiment_(\d+)", d))
+            and (m := re.match(rf"{re.escape(prefix)}_(\d+)", d))
         ]
-        return max(experiment_ids, default=0)
-
+        return max(experiment_ids, default=-1)
+    
     def _set_experiment_name(self):
         if self.experiment_name:
             return
 
+        prefix = self.env_name.lower() if self.env_name else "experiment"
         last_id = self._get_last_experiment_id()
         candidate_id = last_id + 1
-        candidate_name = f"experiment_{candidate_id}"
+        candidate_name = f"{prefix}_{candidate_id}"
 
-        # Check if mode-specific subdir already exists in last experiment
         if self.train_mode.name in ('refine', 'online'):
-            last_exp_dir = os.path.join(self.checkpoint_dir, f"experiment_{last_id}")
+            last_exp_dir = os.path.join(self.checkpoint_dir, f"{prefix}_{last_id}")
             if os.path.isdir(last_exp_dir) and self.train_mode.name not in os.listdir(last_exp_dir):
-                candidate_name = f"experiment_{last_id}"
+                candidate_name = f"{prefix}_{last_id}"
 
         self.experiment_name = candidate_name
 
@@ -221,6 +221,7 @@ class Trainer(ABC):
                 project=self.cfg.wandb_project,
                 group=group_name,
                 name=run_name,
+                tags=[self.cfg.env_name],
                 mode="disabled" if self.cfg.debug else "online",
                 config=self.cfg,
             )

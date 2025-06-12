@@ -8,7 +8,7 @@ debug: false
 seeds: 42
 n_seeds: 5
 
-wandb_project: pushing_offline_rl
+wandb_project: td3-bc
 
 checkpoint_dir: ./checkpoints
 
