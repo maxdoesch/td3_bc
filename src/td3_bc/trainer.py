@@ -4,7 +4,7 @@ import shutil
 import torch
 import logging
 import minari
-from typing import Dict, Optional, Union, List
+from typing import Dict, Optional, Union, List, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -54,7 +54,9 @@ class TrainerConfig():
     checkpoint_freq: int = 5_000
     eval_episodes: int = 16
     batch_size: int = 256
-    debug: bool = False
+
+    debug: bool = False  #do not log to wandb
+    resume: bool = None   #resume training
 
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -111,7 +113,7 @@ class TrainerConfig():
         self.experiment_dir = os.path.join(self.checkpoint_dir, self.experiment_name)
         self.checkpoint_mode_dir = os.path.join(self.experiment_dir, self.train_mode.name)
 
-        if os.path.exists(self.checkpoint_mode_dir):
+        if os.path.exists(self.checkpoint_mode_dir) and not self.resume:
             shutil.rmtree(self.checkpoint_mode_dir)
 
         os.makedirs(self.checkpoint_mode_dir, exist_ok=True)
@@ -179,7 +181,7 @@ class Trainer(ABC):
         np.random.seed(seed)
         self.envs.reset(seed=seed)
     
-    def _load_agent(self, seed: int):
+    def _load_agent(self, pretrain_dir: str, pretrain_checkpoint: int, seed: int):
         self.agent = td3_bc.get_td3_bc_agent(
             obs_dim=self.obs_dim,
             action_dim=self.action_dim,
@@ -190,14 +192,14 @@ class Trainer(ABC):
         )
 
         pretrain_path = None
-        if self.cfg.pretrain_dir:
-            if self.cfg.pretrain_checkpoint:
+        if pretrain_dir:
+            if pretrain_checkpoint:
                 pretrain_path = os.path.join(
-                    self.cfg.pretrain_dir, f'seed_{seed}', f'checkpoint_{self.cfg.pretrain_checkpoint}'
+                    pretrain_dir, f'seed_{seed}', f'checkpoint_{pretrain_checkpoint}'
                 )
             else:
                 pretrain_path = os.path.join(
-                    self.cfg.pretrain_dir, f'seed_{seed}', 'checkpoint_latest'
+                    pretrain_dir, f'seed_{seed}', 'checkpoint_latest'
                 )
 
             if os.path.exists(pretrain_path):
@@ -208,8 +210,53 @@ class Trainer(ABC):
         else:
             logging.info("No pretraining directory specified, starting from scratch.")
 
+    def _check_resume(self, seed: int) -> Tuple[str, int, int, Optional[str]]:
+        """
+        Check if training should resume from a previous checkpoint.
+
+        Returns:
+            pretrain_dir (str): Path to the pretrained directory.
+            pretrain_checkpoint (int): Step number to resume from.
+            start_step (int): Step to start training from.
+            run_id (Optional[str]): wandb run ID to resume logging.
+        """
+        pretrain_dir = self.cfg.pretrain_dir
+        pretrain_checkpoint = self.cfg.pretrain_checkpoint
+        start_step = 0
+        run_id = None
+
+        seed_dir = os.path.join(self.cfg.checkpoint_mode_dir, f'seed_{seed}')
+        os.makedirs(seed_dir, exist_ok=True)
+
+        if self.cfg.resume and os.path.isdir(seed_dir):
+            checkpoints = [
+                int(m.group(1))
+                for d in os.listdir(seed_dir)
+                if (m := re.match(r'checkpoint_(\d+)', d))
+            ]
+            if checkpoints:
+                resume_step = max(checkpoints)
+                if resume_step < self.cfg.train_steps:
+                    pretrain_dir = self.cfg.checkpoint_mode_dir
+                    pretrain_checkpoint = resume_step
+                    start_step = resume_step + 1
+                    wandb_id_file = os.path.join(seed_dir, 'wandb_id.txt')
+                    if os.path.exists(wandb_id_file):
+                        with open(wandb_id_file, 'r') as f:
+                            run_id = f.read().strip()
+                    logging.info(f"Resuming training from step {resume_step} for seed {seed}.")
+                else:
+                    logging.info(f"Training already completed for seed {seed}. Skipping!")
+                    return None, None, None, "skip"
+
+        return pretrain_dir, pretrain_checkpoint, start_step, run_id
+
     def train(self):
         for seed in self.cfg.seeds:
+            pretrain_dir, pretrain_checkpoint, start_step, run_id = self._check_resume(seed)
+            if run_id == "skip":
+                continue
+
             logging.info(f"{'-' * 40}")
             logging.info(f"Starting training: Mode={self.cfg.train_mode.name} | Experiment: {self.cfg.experiment_name} | Seed={seed} | Device={self.cfg.device}")
             logging.info(f"Save run to {self.cfg.checkpoint_mode_dir}")
@@ -217,18 +264,23 @@ class Trainer(ABC):
             
             group_name = f"{self.cfg.experiment_name}_{self.cfg.train_mode.name}"
             run_name = f"{group_name}_seed_{seed}"
-            wandb.init(
+            run = wandb.init(
                 project=self.cfg.wandb_project,
                 group=group_name,
                 name=run_name,
                 tags=[self.cfg.env_name, self.cfg.dataset_path],
                 mode="disabled" if self.cfg.debug else "online",
                 config=self.cfg,
+                id = run_id,
+                resume="must" if self.cfg.resume else 'never',
             )
+            run_id = run.id
+            with open(os.path.join(self.cfg.checkpoint_mode_dir, f'seed_{seed}', 'wandb_id.txt'), 'w') as f:
+                f.write(run_id)
 
             self._set_seed(seed)
 
-            self._load_agent(seed)
+            self._load_agent(pretrain_dir, pretrain_checkpoint, seed)
 
             self.initialize_replay_buffer()
 
@@ -240,15 +292,15 @@ class Trainer(ABC):
                 render=False,
             )
 
-            for i in tqdm(range(self.cfg.train_steps), desc="Training Steps"):
+            for i in tqdm(range(start_step, self.cfg.train_steps), desc="Training Steps", initial=start_step, total=self.cfg.train_steps):
                 batch = self.get_batch(self.cfg.batch_size)
                 metrics = self.agent.train_step(batch)
 
-                wandb.log(metrics, step=i)
+                run.log(metrics, step=i)
 
                 if (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0:
                     eval_metrics = self.evaluator.evaluate()
-                    wandb.log(eval_metrics, step=i)
+                    run.log(eval_metrics, step=i)
 
                 if (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1:
                     checkpoint_dir = os.path.join(self.cfg.checkpoint_mode_dir, f'seed_{seed}', f'checkpoint_{i+1}')
@@ -259,7 +311,7 @@ class Trainer(ABC):
                     os.makedirs(latest_checkpoint, exist_ok=True)
                     self.agent.save(latest_checkpoint)
 
-            wandb.finish()
+            run.finish()
 
 class OfflineTrainer(Trainer):
     def __init__(self, cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None):
