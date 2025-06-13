@@ -56,7 +56,7 @@ class TrainerConfig():
     batch_size: int = 256
 
     debug: bool = False  #do not log to wandb
-    resume: bool = None   #resume training
+    resume: bool = False   #resume training
 
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -122,6 +122,14 @@ class TrainerConfig():
         cfg_path = os.path.join(self.checkpoint_mode_dir, 'config.yaml')
         with open(cfg_path, 'w') as f:
             draccus.dump(self, f)
+        
+    def _load_config(self, cfg_path: str):
+        if not os.path.exists(cfg_path):
+            raise ValueError(f"Config file {cfg_path} does not exist.")
+        
+        with open(cfg_path, 'r') as f:
+            loaded_cfg = draccus.load(TrainerConfig, f)
+            self.__dict__.update(loaded_cfg.__dict__)
 
     def __post_init__(self):
         if isinstance(self.seeds, int):
@@ -130,7 +138,17 @@ class TrainerConfig():
     def initialize_config(self):
         self._set_experiment_name()
         self._create_checkpoint_dir()
-        self._save_config()
+        if self.resume:
+            resume = self.resume
+            debug = self.debug
+
+            cfg_path = os.path.join(self.checkpoint_mode_dir, 'config.yaml')
+            self._load_config(cfg_path)
+
+            self.resume = resume
+            self.debug = debug
+        else:
+            self._save_config()
     
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5):
     return (array - mean) / (std + eps)
