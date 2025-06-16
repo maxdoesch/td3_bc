@@ -290,7 +290,7 @@ class Trainer(ABC):
                 mode="disabled" if self.cfg.debug else "online",
                 config=self.cfg,
                 id = run_id,
-                resume="must" if self.cfg.resume else 'never',
+                resume="allow" if self.cfg.resume else 'never',
             )
             run_id = run.id
             with open(os.path.join(self.cfg.checkpoint_mode_dir, f'seed_{seed}', 'wandb_id.txt'), 'w') as f:
