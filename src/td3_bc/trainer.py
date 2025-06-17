@@ -443,7 +443,7 @@ def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Option
 def main():
     episode_length = 100
 
-    cfg = PretrainConfig()
+    cfg = TrainerConfig()
     envs = gym.make_vec(cfg.env_name, num_envs=cfg.num_envs, vectorization_mode="sync")
     episodes = 3
     episode_length = 1000

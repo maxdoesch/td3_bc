@@ -7,7 +7,7 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 
-from src.td3_bc.trainer import get_trainer, TrainerConfig
+from td3_bc.trainer import get_trainer, TrainerConfig
 
 @draccus.wrap()
 def main(cfg: TrainerConfig):
