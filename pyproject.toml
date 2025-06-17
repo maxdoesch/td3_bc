@@ -1,7 +1,7 @@
 [project]
 name = "td3-bc"
 version = "0.1.0"
-description = "Add your description here"
+description = "A repository for offline to online RL using the TD3-BC algorithm."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
