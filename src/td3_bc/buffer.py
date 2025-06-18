@@ -6,8 +6,10 @@ import minari
 import logging
 from typing import Dict, Tuple, Optional
 
+
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5):
     return (array - mean) / (std + eps)
+
 
 class ReplayBuffer:
     def __init__(self, obs_dim: int, action_dim: int, max_size: int = int(1e7), device: Optional[str] = None):
@@ -16,7 +18,7 @@ class ReplayBuffer:
         self.size = 0
 
         if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
         self.obs = np.zeros((max_size, obs_dim))
@@ -101,16 +103,16 @@ class ReplayBuffer:
                 "action": dict_dataset["acts"][episode],
                 "next_obs": dict_dataset["next_obs"][episode],
                 "reward": dict_dataset["rews"][episode],
-                "done": dict_dataset['dones'][episode]
+                "done": dict_dataset["dones"][episode],
             }
 
             self.add(**transition)
 
-        self.obs = self.obs[:self.size]
-        self.action = self.action[:self.size]
-        self.reward = self.reward[:self.size]
-        self.next_obs = self.next_obs[:self.size]
-        self.not_done = self.not_done[:self.size]
+        self.obs = self.obs[: self.size]
+        self.action = self.action[: self.size]
+        self.reward = self.reward[: self.size]
+        self.next_obs = self.next_obs[: self.size]
+        self.not_done = self.not_done[: self.size]
 
     def convert_minari(self, dataset: minari.MinariDataset):
         assert dataset.observation_space.shape[0] == self.obs.shape[-1], "Observation dimension mismatch."
@@ -122,15 +124,15 @@ class ReplayBuffer:
                 "action": episode.actions,
                 "next_obs": episode.observations[1:],
                 "reward": episode.rewards,
-                "done": episode.terminations
+                "done": episode.terminations,
             }
             self.add(**transition)
 
-        self.obs = self.obs[:self.size]
-        self.action = self.action[:self.size]
-        self.reward = self.reward[:self.size]
-        self.next_obs = self.next_obs[:self.size]
-        self.not_done = self.not_done[:self.size]
+        self.obs = self.obs[: self.size]
+        self.action = self.action[: self.size]
+        self.reward = self.reward[: self.size]
+        self.next_obs = self.next_obs[: self.size]
+        self.not_done = self.not_done[: self.size]
 
     def save_statistics(self, stats_path: str):
         """
@@ -142,7 +144,7 @@ class ReplayBuffer:
 
         if not stats_path.endswith(".json"):
             stats_path = os.path.join(stats_path, "dataset_statistics.json")
-            
+
         stats = {
             "obs_mean": self.obs_mean.tolist(),
             "obs_std": self.obs_std.tolist(),
@@ -181,8 +183,8 @@ class ReplayBuffer:
                 - obs_mean (np.ndarray): The mean of the observations.
                 - obs_std (np.ndarray): The standard deviation of the observations.
         """
-        obs_mean = np.mean(self.obs[:self.size], axis=0, keepdims=True)
-        obs_std = np.std(self.obs[:self.size], axis=0, keepdims=True)
+        obs_mean = np.mean(self.obs[: self.size], axis=0, keepdims=True)
+        obs_std = np.std(self.obs[: self.size], axis=0, keepdims=True)
 
         return obs_mean, obs_std
 
@@ -197,8 +199,8 @@ class ReplayBuffer:
         self.obs_mean = obs_mean
         self.obs_std = obs_std
 
-        self.obs[:self.size] = normalize(self.obs[:self.size], self.obs_mean, self.obs_std)
-        self.next_obs[:self.size] = normalize(self.next_obs[:self.size], self.obs_mean, self.obs_std)
+        self.obs[: self.size] = normalize(self.obs[: self.size], self.obs_mean, self.obs_std)
+        self.next_obs[: self.size] = normalize(self.next_obs[: self.size], self.obs_mean, self.obs_std)
 
     def get_dataset_statistics(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -210,6 +212,7 @@ class ReplayBuffer:
                 - obs_std (np.ndarray): The standard deviation of the observations.
         """
         return self.obs_mean, self.obs_std
+
 
 if __name__ == "__main__":
     # Example usage
@@ -244,10 +247,10 @@ if __name__ == "__main__":
     episode_length = 1000
     dict_dataset = {
         "obs": [np.random.randn(episode_length, obs_dim) for _ in range(episodes)],
-        'next_obs': [np.random.randn(episode_length, obs_dim) for _ in range(episodes)],
+        "next_obs": [np.random.randn(episode_length, obs_dim) for _ in range(episodes)],
         "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
         "rews": [np.random.randn(episode_length) for _ in range(episodes)],
-        'dones': [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)]
+        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
     }
     buffer.convert_dict(dict_dataset)
     print("Buffer size after converting dictionary dataset:", buffer.size)

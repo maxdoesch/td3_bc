@@ -7,10 +7,12 @@ import gymnasium as gym
 from gymnasium.vector import VectorEnv
 from abc import ABC, abstractmethod
 
-import src.td3_bc.td3_bc as td3_bc
+import td3_bc.td3_bc as td3_bc
+
 
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5) -> np.ndarray:
     return (array - mean) / (std + eps)
+
 
 class Metric(ABC):
     def __init__(self, n_envs: int) -> None:
@@ -62,6 +64,24 @@ class RewardAndLengthMetric(Metric):
         }
 
 
+class NormalizedRewardMetric(RewardAndLengthMetric):
+    def __init__(self, n_envs: int, ref_min_score: float, ref_max_score: float):
+        super().__init__(n_envs)
+        self.ref_min_score = ref_min_score
+        self.ref_max_score = ref_max_score
+
+    def get_normalized_score(self, score: np.ndarray) -> np.ndarray:
+        return (score - self.ref_min_score) / (self.ref_max_score - self.ref_min_score)
+
+    def compute(self) -> Dict[str, float]:
+        normalized_rewards = self.get_normalized_score(np.array(self.episode_rewards))
+
+        return {
+            "eval/mean_normalized_reward": float(np.mean(normalized_rewards)),
+            "eval/std_normalized_reward": float(np.std(normalized_rewards)),
+        }
+
+
 class Evaluator:
     def __init__(
         self,
@@ -89,10 +109,10 @@ class Evaluator:
                     stats = json.load(f)
                 self.obs_mean, self.obs_std = np.array(stats["obs_mean"]), np.array(stats["obs_std"])
 
-                logging.info(f'Loaded dataset_statistics from {dataset_statistics_path}.')
+                logging.info(f"Loaded dataset_statistics from {dataset_statistics_path}.")
             else:
                 raise FileNotFoundError(f"Dataset statistics file not found: {dataset_statistics_path}")
-    
+
     def set_obs_statistics(self, obs_mean: np.ndarray, obs_std: np.ndarray):
         self.obs_mean = obs_mean
         self.obs_std = obs_std
@@ -122,7 +142,7 @@ class Evaluator:
 
             if self.render:
                 self.envs.render()
-        
+
         self.envs.reset()
 
         return self.metric.compute()

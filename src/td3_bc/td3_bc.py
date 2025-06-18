@@ -10,7 +10,8 @@ import numpy as np
 import torch
 from torch.nn import functional
 
-import src.td3_bc.policies as policies
+import td3_bc.policies as policies
+
 
 @dataclass
 class TD3BC_Base_Config:
@@ -44,6 +45,7 @@ class BaseAgent(ABC):
     def select_action(self, obs: np.ndarray) -> np.ndarray:
         pass
 
+
 class DummyAgent(BaseAgent):
     def __init__(self, obs_dim: int, action_dim: int, max_action: float):
         self.obs_dim = obs_dim
@@ -66,7 +68,7 @@ class TD3BC_Base(BaseAgent):
         device: Optional[str] = None,
     ):
         if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
         self.actor, self.critic = policies.policy_factory("mlp", obs_dim, action_dim, max_action, self.device)
@@ -150,7 +152,7 @@ class TD3BC_Base(BaseAgent):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
     def save(self, dir_path: str):
-        file_path = os.path.join(dir_path, 'td3_bc.pt')
+        file_path = os.path.join(dir_path, "td3_bc.pt")
         torch.save(
             {
                 "critic_state_dict": self.critic.state_dict(),
@@ -161,10 +163,10 @@ class TD3BC_Base(BaseAgent):
             file_path,
         )
 
-        logging.debug(f'Model parameters saved to: {file_path}.')
+        logging.debug(f"Model parameters saved to: {file_path}.")
 
     def load(self, dir_path: str):
-        file_path = os.path.join(dir_path, 'td3_bc.pt')
+        file_path = os.path.join(dir_path, "td3_bc.pt")
         checkpoint = torch.load(file_path)
 
         self.critic.load_state_dict(checkpoint["critic_state_dict"])
@@ -175,7 +177,8 @@ class TD3BC_Base(BaseAgent):
         self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
         self.actor_target = copy.deepcopy(self.actor)
 
-        logging.debug(f'Model parameters loaded from: {file_path}.')
+        logging.debug(f"Model parameters loaded from: {file_path}.")
+
 
 class TD3BC(TD3BC_Base):
     def __init__(
@@ -260,6 +263,7 @@ class TD3BC_Refine(TD3BC_Base):
 
         return metrics
 
+
 class TD3BC_Online(TD3BC):
     def __init__(
         self,
@@ -304,7 +308,7 @@ if __name__ == "__main__":
     cfg = TD3BC_Config()
     agent = TD3BC(3, 4, 1.0, cfg)
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     batch = {
         "obs": torch.randn(32, 3).to(device),
