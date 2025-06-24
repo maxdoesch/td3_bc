@@ -93,17 +93,51 @@ class ReplayBuffer:
             "not_done": torch.FloatTensor(self.not_done[idx]).to(self.device),
         }
 
+#    def convert_dict(self, dict_dataset):
+#        """
+#        Populate the replay buffer with transitions from a dictionary dataset.
+#        """
+#        for episode in range(len(dict_dataset["obs"])):
+#            transition = {
+#                "obs": dict_dataset["obs"][episode],
+#                "action": dict_dataset["acts"][episode],
+#                "next_obs": dict_dataset["next_obs"][episode],
+#                "reward": dict_dataset["rews"][episode],
+#                "done": dict_dataset["dones"][episode],
+#            }
+#
+#            self.add(**transition)
+#
+#        self.obs = self.obs[: self.size]
+#        self.action = self.action[: self.size]
+#        self.reward = self.reward[: self.size]
+#        self.next_obs = self.next_obs[: self.size]
+#        self.not_done = self.not_done[: self.size]
+
+
     def convert_dict(self, dict_dataset):
         """
         Populate the replay buffer with transitions from a dictionary dataset.
+
+        Args:
+            dict_dataset (dict): A dictionary containing episode data with the following keys:
+                - "obs" (list of np.ndarray): Observations for each episode, where each element is an array of shape (episode_length, state_dim).
+                - "acts" (list of np.ndarray): Actions for each episode, where each element is an array of shape (episode_length, action_dim).
+                - "rews" (list of np.ndarray): Rewards for each episode, where each element is an array of shape (episode_length,).
         """
-        for episode in range(len(dict_dataset["obs"])):
+
+        for episode in range(len(dict_dataset["acts"])):
             transition = {
-                "obs": dict_dataset["obs"][episode],
-                "action": dict_dataset["acts"][episode],
-                "next_obs": dict_dataset["next_obs"][episode],
-                "reward": dict_dataset["rews"][episode],
-                "done": dict_dataset["dones"][episode],
+                "obs": np.array(dict_dataset["obs"][episode][:-1]),
+                "action": np.array(dict_dataset["acts"][episode]),
+                "next_obs": np.array(dict_dataset["obs"][episode][1:]),
+                "reward": np.array(dict_dataset["rews"][episode]),
+                "done": np.concatenate(
+                    [
+                        np.zeros_like(dict_dataset["rews"][episode][:-1]),
+                        np.ones_like(dict_dataset["rews"][episode][-1:]),
+                    ]
+                ),
             }
 
             self.add(**transition)

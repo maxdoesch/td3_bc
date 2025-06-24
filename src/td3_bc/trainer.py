@@ -389,7 +389,7 @@ class OnlineTrainer(Trainer):
 
         actions = (
             self.agent.select_action(norm_obs)
-            + np.random.normal(0, self.cfg.train_mode.expl_noise, size=self.action_dim)
+            + np.random.normal(0, self.cfg.train_mode.expl_noise * self.max_action, size=self.action_dim)
         ).clip(-self.max_action, self.max_action)
 
         next_obs, rewards, terminated, truncated, _ = self.envs.step(actions)

@@ -82,8 +82,8 @@ class TD3BC_Base(BaseAgent):
         self.max_action = max_action
         self.discount = cfg.discount
         self.tau = cfg.tau
-        self.policy_noise = cfg.policy_noise
-        self.noise_clip = cfg.noise_clip
+        self.policy_noise = cfg.policy_noise * self.max_action
+        self.noise_clip = cfg.noise_clip * self.max_action
         self.alpha = cfg.alpha
 
     @torch.inference_mode
