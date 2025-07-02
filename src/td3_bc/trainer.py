@@ -156,7 +156,7 @@ class TrainerConfig:
             self._save_config()
 
 
-def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5):
+def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3):
     return (array - mean) / (std + eps)
 
 

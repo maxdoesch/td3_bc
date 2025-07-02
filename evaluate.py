@@ -4,11 +4,13 @@ import numpy as np
 import draccus
 import gymnasium as gym
 from dataclasses import dataclass
+from typing import Union
 
 from td3_bc.trainer import TrainerConfig
 from td3_bc.evaluator import Evaluator
 import td3_bc.td3_bc as td3_bc
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_normalized_score(score: np.ndarray, ref_min_score: float, ref_max_score: float) -> np.ndarray:
     return (score - ref_min_score) / (ref_max_score - ref_min_score)
@@ -17,7 +19,7 @@ def get_normalized_score(score: np.ndarray, ref_min_score: float, ref_max_score:
 @dataclass
 class EvalConfig:
     checkpoint_mode_path: str
-    checkpoint_step: int
+    checkpoint_step: Union[int, str] = "latest"
     n_eval_episodes: int = 10
     num_envs: int = 1
     seed: int = 43
@@ -67,6 +69,7 @@ def main(cfg: EvalConfig):
             max_action=max_action,
             train_steps=cfg.trainer_config.train_steps,
             cfg=cfg.trainer_config.train_mode.td3_config,
+            device=device,
         )
         checkpoint_path = os.path.join(
             cfg.checkpoint_mode_path, f"seed_{orig_seed}", f"checkpoint_{cfg.checkpoint_step}"

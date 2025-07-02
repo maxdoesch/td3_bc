@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 import td3_bc.td3_bc as td3_bc
 
 
-def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5) -> np.ndarray:
+def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3) -> np.ndarray:
     return (array - mean) / (std + eps)
 
 

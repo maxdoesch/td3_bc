@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Tuple, Optional
 
 
-def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-5):
+def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3):
     return (array - mean) / (std + eps)
 
 
