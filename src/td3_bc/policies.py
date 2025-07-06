@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -7,9 +7,9 @@ import torch.nn as nn
 
 class BaseActor(nn.Module, ABC):
     @abstractmethod
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
+    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
         super().__init__()
-        self.obs_dim = obs_dim
+        self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
@@ -21,9 +21,9 @@ class BaseActor(nn.Module, ABC):
 
 
 class BaseCritic(nn.Module, ABC):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int, n_layers: int):
+    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int):
         super().__init__()
-        self.obs_dim = obs_dim
+        self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
@@ -42,12 +42,16 @@ class BaseCritic(nn.Module, ABC):
 
 
 class MlpActor(BaseActor):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
-        super().__init__(obs_dim, action_dim, hidden_dim, n_layers, max_action)
+    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
+        super().__init__(obs_shape, action_dim, hidden_dim, n_layers, max_action)
+
+        assert isinstance(obs_shape, int) or len(obs_shape) == 1, "MLP Policy requires a 1D observation shape."
+
+        self.obs_dim = obs_shape if isinstance(obs_shape, int) else obs_shape[0]
 
         self.model = nn.Sequential(
             *[
-                nn.Linear(obs_dim, hidden_dim),
+                nn.Linear(self.obs_dim, hidden_dim),
                 nn.ReLU(),
                 *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
                 nn.Linear(hidden_dim, action_dim),
@@ -60,12 +64,16 @@ class MlpActor(BaseActor):
 
 
 class MlpCritic(BaseCritic):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int, n_layers: int):
-        super().__init__(obs_dim, action_dim, hidden_dim, n_layers)
+    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int):
+        super().__init__(obs_shape, action_dim, hidden_dim, n_layers)
+
+        assert isinstance(obs_shape, int) or len(obs_shape) == 1, "MLP Critic requires a 1D observation shape."
+
+        self.obs_dim = obs_shape if isinstance(obs_shape, int) else obs_shape[0]
 
         self.critic1 = nn.Sequential(
             *[
-                nn.Linear(obs_dim + action_dim, hidden_dim),
+                nn.Linear(self.obs_dim + action_dim, hidden_dim),
                 nn.ReLU(),
                 *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
                 nn.Linear(hidden_dim, 1),
@@ -74,7 +82,7 @@ class MlpCritic(BaseCritic):
 
         self.critic2 = nn.Sequential(
             *[
-                nn.Linear(obs_dim + action_dim, hidden_dim),
+                nn.Linear(self.obs_dim + action_dim, hidden_dim),
                 nn.ReLU(),
                 *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
                 nn.Linear(hidden_dim, 1),
@@ -137,7 +145,7 @@ def policy_factory(name: str, obs_dim: int, action_dim: int, max_action: float, 
 
 if __name__ == "__main__":
     # Example usage
-    obs_dim = 3
+    obs_shape = (3,)
     action_dim = 4
     hidden_dim = 64
     n_layers = 2
@@ -146,10 +154,10 @@ if __name__ == "__main__":
     batch_size = 32
 
     # Create actor and critic
-    actor = MlpActor(obs_dim, action_dim, hidden_dim, n_layers, max_action)
-    critic = MlpCritic(obs_dim, action_dim, hidden_dim, n_layers)
+    actor = MlpActor(obs_shape, action_dim, hidden_dim, n_layers, max_action)
+    critic = MlpCritic(obs_shape, action_dim, hidden_dim, n_layers)
 
-    obs = torch.randn(batch_size, obs_dim)
+    obs = torch.randn(batch_size, *obs_shape)
     action = torch.randn(batch_size, action_dim)
 
     q1, q2 = critic(obs, action)

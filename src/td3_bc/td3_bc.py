@@ -4,7 +4,7 @@ import time
 import logging
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -47,21 +47,25 @@ class BaseAgent(ABC):
 
 
 class DummyAgent(BaseAgent):
-    def __init__(self, obs_dim: int, action_dim: int, max_action: float):
-        self.obs_dim = obs_dim
+    def __init__(
+            self, 
+            obs_shape: Union[int, Tuple[int, ...]], 
+            action_dim: int, 
+            max_action: float
+        ):
+
+        self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
         self.max_action = max_action
 
     def select_action(self, obs):
-        assert obs.shape[-1] == self.obs_dim, "The dimension of obs and the internal obs_dim do not match."
-
         return np.random.randn(obs.shape[0], self.action_dim) * self.max_action
 
 
 class TD3BC_Base(BaseAgent):
     def __init__(
         self,
-        obs_dim: int,
+        obs_shape: Union[int, Tuple[int, ...]],
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Base_Config] = None,
@@ -71,7 +75,9 @@ class TD3BC_Base(BaseAgent):
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
-        self.actor, self.critic = policies.policy_factory("mlp", obs_dim, action_dim, max_action, self.device)
+        obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
+
+        self.actor, self.critic = policies.policy_factory("mlp", obs_shape, action_dim, max_action, self.device)
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
@@ -183,7 +189,7 @@ class TD3BC_Base(BaseAgent):
 class TD3BC(TD3BC_Base):
     def __init__(
         self,
-        obs_dim: int,
+        obs_shape: Union[int, Tuple[int, ...]],
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Config] = None,
@@ -192,7 +198,7 @@ class TD3BC(TD3BC_Base):
         if cfg is None:
             cfg = TD3BC_Config()
 
-        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
+        super().__init__(obs_shape=obs_shape, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
 
         self.policy_freq = cfg.policy_freq
 
@@ -232,7 +238,7 @@ class TD3BC(TD3BC_Base):
 class TD3BC_Refine(TD3BC_Base):
     def __init__(
         self,
-        obs_dim: int,
+        obs_shape: int,
         action_dim: int,
         max_action: float,
         cfg: Optional[TD3BC_Refine_Config] = None,
@@ -241,7 +247,7 @@ class TD3BC_Refine(TD3BC_Base):
         if cfg is None:
             cfg = TD3BC_Refine_Config()
 
-        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
+        super().__init__(obs_shape=obs_shape, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
 
         self.alpha = self.alpha / cfg.scaling_factor_lambda
 
@@ -267,7 +273,7 @@ class TD3BC_Refine(TD3BC_Base):
 class TD3BC_Online(TD3BC):
     def __init__(
         self,
-        obs_dim: int,
+        obs_shape: int,
         action_dim: int,
         max_action: float,
         train_steps: int,
@@ -277,7 +283,7 @@ class TD3BC_Online(TD3BC):
         if cfg is None:
             cfg = TD3BC_Online_Config()
 
-        super().__init__(obs_dim=obs_dim, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
+        super().__init__(obs_shape=obs_shape, action_dim=action_dim, max_action=max_action, cfg=cfg, device=device)
 
         self.alpha_decay_rate = np.exp(np.log(cfg.alpha_end / self.alpha) / train_steps)
 
@@ -292,21 +298,31 @@ class TD3BC_Online(TD3BC):
 
 
 def get_td3_bc_agent(
-    obs_dim: int, action_dim: int, max_action: float, train_steps: int, cfg: TD3BC_Base_Config, device: str
+    obs_shape: Union[int, Tuple[int]], 
+    action_dim: int, 
+    max_action: float, 
+    train_steps: int, 
+    cfg: TD3BC_Base_Config, 
+    device: str
 ) -> TD3BC_Base:
+    
     if type(cfg) is TD3BC_Config:
-        return TD3BC(obs_dim, action_dim, max_action, cfg, device)
+        return TD3BC(obs_shape, action_dim, max_action, cfg, device)
     elif type(cfg) is TD3BC_Refine_Config:
-        return TD3BC_Refine(obs_dim, action_dim, max_action, cfg, device)
+        return TD3BC_Refine(obs_shape, action_dim, max_action, cfg, device)
     elif type(cfg) is TD3BC_Online_Config:
-        return TD3BC_Online(obs_dim, action_dim, max_action, train_steps, cfg, device)
+        return TD3BC_Online(obs_shape, action_dim, max_action, train_steps, cfg, device)
     else:
         raise ValueError(f"Unsupported configuration type: {type(cfg)}")
 
 
 if __name__ == "__main__":
+    obs_shape = (3,)
+    action_dim = 4
+    max_action = 1.0
+
     cfg = TD3BC_Config()
-    agent = TD3BC(3, 4, 1.0, cfg)
+    agent = TD3BC(obs_shape, action_dim, max_action, cfg)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 

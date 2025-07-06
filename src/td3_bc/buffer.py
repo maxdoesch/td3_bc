@@ -4,7 +4,7 @@ import torch
 import json
 import minari
 import logging
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Union
 
 
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3):
@@ -12,7 +12,14 @@ def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float =
 
 
 class ReplayBuffer:
-    def __init__(self, obs_dim: int, action_dim: int, max_size: int = int(1e7), device: Optional[str] = None):
+    def __init__(
+            self, 
+            obs_shape: Union[int, Tuple[int, ...]], 
+            action_dim: int, 
+            max_size: int = int(1e7), 
+            device: Optional[str] = None
+            ):
+        
         self.max_size = max_size
         self.ptr = 0
         self.size = 0
@@ -21,32 +28,35 @@ class ReplayBuffer:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
-        self.obs = np.zeros((max_size, obs_dim))
-        self.action = np.zeros((max_size, action_dim))
-        self.next_obs = np.zeros((max_size, obs_dim))
-        self.reward = np.zeros((max_size, 1))
-        self.not_done = np.zeros((max_size, 1))
+        self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
+        self.action_dim = action_dim
 
-        self.obs_mean = np.zeros(obs_dim)
-        self.obs_std = np.ones(obs_dim)
+        self.obs = np.zeros((max_size,) + self.obs_shape, dtype=np.float32)
+        self.next_obs = np.zeros((max_size,) + self.obs_shape, dtype=np.float32)
+        self.action = np.zeros((max_size, action_dim), dtype=np.float32)
+        self.reward = np.zeros((max_size, 1), dtype=np.float32)
+        self.not_done = np.zeros((max_size, 1), dtype=np.float32)
+
+        self.obs_mean = np.zeros(self.obs_shape, dtype=np.float32)
+        self.obs_std = np.ones(self.obs_shape, dtype=np.float32)
 
     def add(self, obs: np.ndarray, action: np.ndarray, next_obs: np.ndarray, reward: np.ndarray, done: np.ndarray):
         """
         Add transitions to the replay buffer in a vectorized way.
 
         Args:
-            obs (np.ndarray): Unnormalized current obs, shape (n_env, obs_dim) or (obs_dim,)
+            obs (np.ndarray): Unnormalized current obs, shape (n_env, *obs_shape) or (*obs_shape,)
             action (np.ndarray): Action taken, shape (n_env, action_dim) or (action_dim,)
-            next_obs (np.ndarray): Unnormalize next obs, shape (n_env, obs_dim) or (obs_dim,)
+            next_obs (np.ndarray): Unnormalize next obs, shape (n_env, *obs_shape) or (*obs_shape,)
             reward (np.ndarray): Reward received, shape (n_env, 1) or (1,)
             done (np.ndarray): Done flag, shape (n_env, 1) or (1,)
         """
         # Convert to batch if single transition
-        obs = np.expand_dims(obs, axis=0) if obs.ndim == 1 else obs
-        action = np.expand_dims(action, axis=0) if action.ndim == 1 else action
-        next_obs = np.expand_dims(next_obs, axis=0) if next_obs.ndim == 1 else next_obs
-        reward = np.expand_dims(reward, axis=1) if reward.ndim == 1 else reward
-        done = np.expand_dims(done, axis=1) if done.ndim == 1 else done
+        obs = np.expand_dims(obs, 0) if obs.ndim == len(self.obs_shape) else obs
+        next_obs = np.expand_dims(next_obs, 0) if next_obs.ndim == len(self.obs_shape) else next_obs
+        action = np.expand_dims(action, 0) if action.ndim == 1 else action
+        reward = np.expand_dims(reward, 1) if reward.ndim == 1 else reward
+        done = np.expand_dims(done, 1) if done.ndim == 1 else done
 
         assert obs.shape[0] == action.shape[0] == next_obs.shape[0] == reward.shape[0] == done.shape[0], (
             "All inputs must have the same first dimension (number of environments)."
@@ -77,20 +87,20 @@ class ReplayBuffer:
 
         Returns:
             Dict[str, torch.Tensor]: A dictionary containing the following keys:
-                - "obs": Tensor of shape (batch_size, obs_dim) with normalized observations.
+                - "obs": Tensor of shape (batch_size, *obs_shape) with normalized observations.
                 - "action": Tensor of shape (batch_size, action_dim) with actions taken.
-                - "next_obs": Tensor of shape (batch_size, obs_dim) with normalized next observations.
+                - "next_obs": Tensor of shape (batch_size, *obs_shape) with normalized next observations.
                 - "reward": Tensor of shape (batch_size) with rewards received.
                 - "not_done": Tensor of shape (batch_size) indicating whether the episode has not ended.
         """
         idx = np.random.randint(0, self.size, size=batch_size)
 
         return {
-            "obs": torch.FloatTensor(self.obs[idx]).to(self.device),
-            "action": torch.FloatTensor(self.action[idx]).to(self.device),
-            "next_obs": torch.FloatTensor(self.next_obs[idx]).to(self.device),
-            "reward": torch.FloatTensor(self.reward[idx]).to(self.device),
-            "not_done": torch.FloatTensor(self.not_done[idx]).to(self.device),
+            "obs": torch.tensor(self.obs[idx], dtype=torch.float32).to(self.device),
+            "action": torch.tensor(self.action[idx], dtype=torch.float32).to(self.device),
+            "next_obs": torch.tensor(self.next_obs[idx], dtype=torch.float32).to(self.device),
+            "reward": torch.tensor(self.reward[idx], dtype=torch.float32).to(self.device),
+            "not_done": torch.tensor(self.not_done[idx], dtype=torch.float32).to(self.device),
         }
 
 #    def convert_dict(self, dict_dataset):
@@ -217,8 +227,8 @@ class ReplayBuffer:
                 - obs_mean (np.ndarray): The mean of the observations.
                 - obs_std (np.ndarray): The standard deviation of the observations.
         """
-        obs_mean = np.mean(self.obs[: self.size], axis=0, keepdims=True)
-        obs_std = np.std(self.obs[: self.size], axis=0, keepdims=True)
+        obs_mean = np.mean(self.obs[: self.size], axis=0, keepdims=False)
+        obs_std = np.std(self.obs[: self.size], axis=0, keepdims=False)
 
         return obs_mean, obs_std
 
@@ -250,18 +260,18 @@ class ReplayBuffer:
 
 if __name__ == "__main__":
     # Example usage
-    obs_dim = 3
+    obs_shape = 3
     action_dim = 4
     max_size = int(1e6)
     n_env = 5
 
-    buffer = ReplayBuffer(obs_dim, action_dim, max_size)
+    buffer = ReplayBuffer(obs_shape, action_dim, max_size)
 
     # Simulate adding transitions
     transition = {
-        "obs": np.random.rand(n_env, obs_dim),
+        "obs": np.random.rand(n_env, obs_shape),
         "action": np.random.rand(n_env, action_dim),
-        "next_obs": np.random.rand(n_env, obs_dim),
+        "next_obs": np.random.rand(n_env, obs_shape),
         "reward": np.random.rand(n_env, 1),
         "done": np.random.randint(0, 2, size=(n_env, 1)),
     }
@@ -280,8 +290,7 @@ if __name__ == "__main__":
     episodes = 3
     episode_length = 1000
     dict_dataset = {
-        "obs": [np.random.randn(episode_length, obs_dim) for _ in range(episodes)],
-        "next_obs": [np.random.randn(episode_length, obs_dim) for _ in range(episodes)],
+        "obs": [np.random.randn(episode_length + 1, obs_shape) for _ in range(episodes)],
         "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
         "rews": [np.random.randn(episode_length) for _ in range(episodes)],
         "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
@@ -295,3 +304,23 @@ if __name__ == "__main__":
     buffer.set_dataset_statistics(mean, std)
     print("Mean:", mean)
     print("Std:", std)
+
+    obs_shape = (32, 32, 3)
+    buffer = ReplayBuffer(obs_shape, action_dim, max_size=int(1e6))
+    print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
+
+    episode_length = 100
+    dict_dataset = {
+        "obs": [np.random.randn(episode_length + 1, *obs_shape) for _ in range(episodes)],
+        "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
+        "rews": [np.random.randn(episode_length) for _ in range(episodes)],
+        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
+    }
+    buffer.convert_dict(dict_dataset)
+    print("Buffer size after converting dictionary dataset with complex shapes:", buffer.size)
+    print("Buffer pointer after converting dictionary dataset with complex shapes:", buffer.ptr)
+
+    mean, std = buffer.compute_dataset_statistics()
+    buffer.set_dataset_statistics(mean, std)
+
+    print("Mean and std shapes:", mean.shape, std.shape)

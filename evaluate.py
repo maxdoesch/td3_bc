@@ -47,7 +47,7 @@ def main(cfg: EvalConfig):
         render_mode="human" if cfg.render else None,
     )
 
-    obs_dim = envs.single_observation_space.shape[0]
+    obs_shape = envs.single_observation_space.shape
     action_dim = envs.single_action_space.shape[0]
     max_action = envs.single_action_space.high[0]
 
@@ -64,7 +64,7 @@ def main(cfg: EvalConfig):
         envs.reset(seed=seed)
 
         agent = td3_bc.get_td3_bc_agent(
-            obs_dim=obs_dim,
+            obs_shape=obs_shape,
             action_dim=action_dim,
             max_action=max_action,
             train_steps=cfg.trainer_config.train_steps,

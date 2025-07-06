@@ -100,8 +100,11 @@ class Evaluator:
         self.n_envs: int = self.envs.num_envs
         self.metric: Metric = metric or RewardAndLengthMetric(self.n_envs)
 
-        self.obs_mean = np.zeros(envs.single_observation_space.shape[0])
-        self.obs_std = np.ones(envs.single_observation_space.shape[0])
+        self.obs_shape = envs.single_observation_space.shape
+        self.action_dim = envs.single_action_space.shape[0]
+
+        self.obs_mean = np.zeros(self.obs_shape, dtype=np.float32)
+        self.obs_std = np.ones(self.obs_shape, dtype=np.float32)
 
         if dataset_statistics_path:
             if os.path.exists(dataset_statistics_path):
@@ -156,7 +159,7 @@ if __name__ == "__main__":
     )
 
     agent = td3_bc.DummyAgent(
-        envs.single_observation_space.shape[0],
+        envs.single_observation_space.shape,
         envs.single_action_space.shape[0],
         max_action=envs.single_action_space.high[0],
     )

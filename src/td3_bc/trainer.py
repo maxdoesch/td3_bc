@@ -172,7 +172,7 @@ class Trainer(ABC):
         else:
             raise ValueError("No environment specified.")
 
-        self.obs_dim = self.envs.single_observation_space.shape[0]
+        self.obs_shape = self.envs.single_observation_space.shape
         self.action_dim = self.envs.single_action_space.shape[0]
         self.max_action = self.envs.single_action_space.high[0]
 
@@ -209,7 +209,7 @@ class Trainer(ABC):
 
     def _load_agent(self, pretrain_dir: str, pretrain_checkpoint: int, seed: int):
         self.agent = td3_bc.get_td3_bc_agent(
-            obs_dim=self.obs_dim,
+            obs_shape=self.obs_shape,
             action_dim=self.action_dim,
             max_action=self.max_action,
             train_steps=self.cfg.train_steps,
@@ -360,7 +360,7 @@ class OfflineTrainer(Trainer):
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim, device=self.cfg.device)
+        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
         self._fill_replay_buffer()
 
         obs_mean, obs_std = self.buffer.compute_dataset_statistics()
@@ -378,11 +378,11 @@ class OnlineTrainer(Trainer):
     def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None):
         super().__init__(cfg, envs)
 
-        self.obs = np.zeros((self.envs.num_envs, self.obs_dim))
+        self.obs = np.zeros((self.envs.num_envs, self.obs_shape))
         self.episode_starts = np.ones(self.envs.num_envs, dtype=np.bool)
 
-        self.obs_mean = np.zeros(self.obs_dim)
-        self.obs_std = np.ones(self.obs_dim)
+        self.obs_mean = np.zeros(self.obs_shape)
+        self.obs_std = np.ones(self.obs_shape)
 
     def step_and_add(self) -> np.ndarray:
         norm_obs = normalize(self.obs, self.obs_mean, self.obs_std)
@@ -417,7 +417,7 @@ class OnlineTrainer(Trainer):
         self.episode_starts = np.zeros(n_envs, dtype=np.bool)
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_dim=self.obs_dim, action_dim=self.action_dim, device=self.cfg.device)
+        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
 
         if self.cfg.pretrain_dir.endswith("/"):
             self.cfg.pretrain_dir = self.cfg.pretrain_dir[:-1]
@@ -457,7 +457,7 @@ def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Option
 def main():
     episode_length = 100
 
-    cfg = TrainerConfig()
+    cfg = TrainerConfig(train_mode=PretrainConfig(), env_name="Hopper-v5", num_envs=4)
     envs = gym.make_vec(cfg.env_name, num_envs=cfg.num_envs, vectorization_mode="sync")
     episodes = 3
     episode_length = 1000
