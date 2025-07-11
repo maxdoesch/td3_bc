@@ -13,13 +13,12 @@ def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float =
 
 class ReplayBuffer:
     def __init__(
-            self, 
-            obs_shape: Union[int, Tuple[int, ...]], 
-            action_dim: int, 
-            max_size: int = int(1e7), 
-            device: Optional[str] = None
-            ):
-        
+        self,
+        obs_shape: Union[int, Tuple[int, ...]],
+        action_dim: int,
+        max_size: int = int(1e7),
+        device: Optional[str] = None,
+    ):
         self.max_size = max_size
         self.ptr = 0
         self.size = 0
@@ -103,27 +102,26 @@ class ReplayBuffer:
             "not_done": torch.tensor(self.not_done[idx], dtype=torch.float32).to(self.device),
         }
 
-#    def convert_dict(self, dict_dataset):
-#        """
-#        Populate the replay buffer with transitions from a dictionary dataset.
-#        """
-#        for episode in range(len(dict_dataset["obs"])):
-#            transition = {
-#                "obs": dict_dataset["obs"][episode],
-#                "action": dict_dataset["acts"][episode],
-#                "next_obs": dict_dataset["next_obs"][episode],
-#                "reward": dict_dataset["rews"][episode],
-#                "done": dict_dataset["dones"][episode],
-#            }
-#
-#            self.add(**transition)
-#
-#        self.obs = self.obs[: self.size]
-#        self.action = self.action[: self.size]
-#        self.reward = self.reward[: self.size]
-#        self.next_obs = self.next_obs[: self.size]
-#        self.not_done = self.not_done[: self.size]
-
+    #    def convert_dict(self, dict_dataset):
+    #        """
+    #        Populate the replay buffer with transitions from a dictionary dataset.
+    #        """
+    #        for episode in range(len(dict_dataset["obs"])):
+    #            transition = {
+    #                "obs": dict_dataset["obs"][episode],
+    #                "action": dict_dataset["acts"][episode],
+    #                "next_obs": dict_dataset["next_obs"][episode],
+    #                "reward": dict_dataset["rews"][episode],
+    #                "done": dict_dataset["dones"][episode],
+    #            }
+    #
+    #            self.add(**transition)
+    #
+    #        self.obs = self.obs[: self.size]
+    #        self.action = self.action[: self.size]
+    #        self.reward = self.reward[: self.size]
+    #        self.next_obs = self.next_obs[: self.size]
+    #        self.not_done = self.not_done[: self.size]
 
     def convert_dict(self, dict_dataset):
         """

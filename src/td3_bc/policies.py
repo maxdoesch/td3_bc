@@ -7,7 +7,9 @@ import torch.nn as nn
 
 class BaseActor(nn.Module, ABC):
     @abstractmethod
-    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
+    def __init__(
+        self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float
+    ):
         super().__init__()
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
@@ -42,7 +44,9 @@ class BaseCritic(nn.Module, ABC):
 
 
 class MlpActor(BaseActor):
-    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
+    def __init__(
+        self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float
+    ):
         super().__init__(obs_shape, action_dim, hidden_dim, n_layers, max_action)
 
         assert isinstance(obs_shape, int) or len(obs_shape) == 1, "MLP Policy requires a 1D observation shape."

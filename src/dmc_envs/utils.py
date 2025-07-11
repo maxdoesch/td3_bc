@@ -1,6 +1,6 @@
 import numpy as np
 from PIL import Image
-import imageio.v3 as imageio
+
 
 def rgb_to_hsv_np(rgb: np.ndarray) -> np.ndarray:
     """Convert RGB image to HSV format (H, W, 3)"""
@@ -15,9 +15,9 @@ def rgb_to_hsv_np(rgb: np.ndarray) -> np.ndarray:
 
     h = np.zeros_like(maxc)
 
-    mask_r = (r == maxc)
-    mask_g = (g == maxc)
-    mask_b = (b == maxc)
+    mask_r = r == maxc
+    mask_g = g == maxc
+    mask_b = b == maxc
 
     h[mask_r] = ((b - g) / delta)[mask_r]
     h[mask_g] = (2.0 + (r - b) / delta)[mask_g]
@@ -26,13 +26,14 @@ def rgb_to_hsv_np(rgb: np.ndarray) -> np.ndarray:
     h = (h / 6.0) % 1.0  # normalize to [0, 1]
     return np.stack([h, s, v], axis=-1)
 
+
 def replace_green_bg(x, bg: np.ndarray) -> np.ndarray:
     assert x.ndim == 3 and bg.ndim == 3, "Input images must be 3-dimensional"
     assert x.dtype == np.uint8 and bg.dtype == np.uint8
 
     channels_first = False if x.shape[-1] == 3 else True
 
-    x_rgb = x if x.shape[-1] == 3 else np.moveaxis(x, 0, -1) #ensure H W C Shape
+    x_rgb = x if x.shape[-1] == 3 else np.moveaxis(x, 0, -1)  # ensure H W C Shape
     bg_rgb = bg if bg.shape[-1] == 3 else np.moveaxis(bg, 0, -1)
 
     hsv = rgb_to_hsv_np(x_rgb)
@@ -45,6 +46,7 @@ def replace_green_bg(x, bg: np.ndarray) -> np.ndarray:
     out[green_mask] = bg_rgb[green_mask]
 
     return np.moveaxis(out, -1, 0) if channels_first else out
+
 
 def interpolate_bg(bg: np.ndarray, size: tuple) -> np.ndarray:
     is_channels_first = bg.shape[1] == 3  # assume RGB

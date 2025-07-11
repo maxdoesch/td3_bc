@@ -12,6 +12,7 @@ import td3_bc.td3_bc as td3_bc
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 def get_normalized_score(score: np.ndarray, ref_min_score: float, ref_max_score: float) -> np.ndarray:
     return (score - ref_min_score) / (ref_max_score - ref_min_score)
 
