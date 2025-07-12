@@ -1,0 +1,27 @@
+services:
+
+  td3-bc:
+    container_name: td3-bc
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - /dev/dri:/dev/dri
+      - /etc/machine-id:/etc/machine-id
+      - /mnt:/mnt
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ../:/td3_bc
+    working_dir: /td3_bc
+    privileged: true
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    pid: host
+    stdin_open: true
+    tty: true
+    command: sleep infinity

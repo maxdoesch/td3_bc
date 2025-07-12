@@ -1,0 +1,46 @@
+{
+	"name": "td3-bc",
+	"dockerComposeFile": "docker-compose.yml",
+
+	// The 'service' property is the name of the service for the container that VS Code should
+	// use. Update this value and .devcontainer/docker-compose.yml to the real service name.
+	"service": "td3-bc",
+
+	// The 'workspaceFolder' property is the path VS Code should open by default when
+	// connected. Corresponds to a volume mount in .devcontainer/docker-compose.yml
+	"workspaceFolder": "/td3_bc",
+
+	"customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "ms-python.pylance",
+                "ms-python.autopep8",
+                "ms-python.debugpy",
+                "ms-azuretools.vscode-docker",
+                "mhutchie.git-graph",
+                "yzhang.markdown-all-in-one",
+                "redhat.vscode-xml",
+                "redhat.vscode-yaml",
+                "ms-toolsai.jupyter",
+                "mechatroner.rainbow-csv"
+            ],
+            "settings": {
+                "terminal.integrated.showOnStartup": true,
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "[python]": {
+                    "editor.defaultFormatter": "ms-python.autopep8"
+                },
+                "autopep8.args": [
+                    "--ignore=E501"
+                ]
+            }
+        }
+    },
+
+	// Uncomment the next line if you want to keep your containers running after VS Code shuts down.
+	// "shutdownAction": "none",
+
+	// Uncomment the next line to use 'postCreateCommand' to run commands after the container is created.
+	// "postCreateCommand": "uname -a",
+}
