@@ -18,6 +18,10 @@ dm-control = [
     "dm-control>=1.0.31",
     "imageio[pyav]>=2.37.0",
 ]
+expert-gen = [
+    "sbx-rl>=0.20.0",
+    "tensorboard>=2.19.0",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -27,6 +31,7 @@ build-backend = "hatchling.build"
 packages = [
     "src/td3_bc",
     "src/dmc_envs",
+    "src/expert_gen",
 ]
 
 [dependency-groups]
