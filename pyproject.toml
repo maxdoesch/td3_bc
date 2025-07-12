@@ -9,8 +9,17 @@ dependencies = [
     "gymnasium[classic-control,mujoco]>=1.1.1",
     "minari[all]>=0.5.3",
     "torch>=2.7.0",
+    "torchvision",
     "tqdm>=4.67.1",
     "wandb>=0.19.11",
+    "opencv-python-headless",
+    "matplotlib",
+    "pandas",
+    "timm",
+    "torchpack",
+    "onnx",
+    "onnxsim",
+    "onnxruntime",
 ]
 
 [build-system]
