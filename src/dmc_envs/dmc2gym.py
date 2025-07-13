@@ -258,13 +258,6 @@ class DistractionDMCWrapper(DMCWrapper):
         video = imageio.imread(video_path, plugin="pyav")
         return np.moveaxis(video, -1, 1) if self._channels_first else video
 
-    def _process_obs(self, obs):
-        observation = obs if self._obs_type == "pixels" else obs["pixels"]
-        observation = replace_green_bg(observation, self._data[self._current_frame])
-        obs = observation if self._obs_type == "pixels" else {"state": obs["state"], "pixels": observation}
-
-        return obs
-
     def reset(self, *, seed=None, options=None):
         self._video_index = np.random.randint(0, len(self._video_paths))
         self._data = self._load_video(self._video_paths[self._video_index])
@@ -272,15 +265,14 @@ class DistractionDMCWrapper(DMCWrapper):
 
         self._current_frame = 0
 
-        obs, info = super().reset(seed=seed, options=options)
-        obs = self._process_obs(obs)
-
-        return obs, info
+        return super().reset(seed=seed, options=options)
 
     def step(self, action):
         self._current_frame = (self._current_frame + 1) % self._data.shape[0]
-        obs, reward, terminated, truncated, info = super().step(action)
 
-        obs = self._process_obs(obs)
+        return super().step(action)
 
-        return obs, reward, terminated, truncated, info
+    def render(self, mode="rgb_array", height=None, width=None, camera_id=0):
+        obs = super().render(mode=mode, height=height, width=width, camera_id=camera_id)
+
+        return replace_green_bg(obs, self._data[self._current_frame])
