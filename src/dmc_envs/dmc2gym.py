@@ -158,6 +158,8 @@ class DMCWrapper(Env):
 
     def seed(self, seed=None):
         if seed is not None:
+            seed = seed % 2**32
+
             np.random.seed(seed)
             self._true_action_space.seed(seed)
             self._norm_action_space.seed(seed)
@@ -233,8 +235,6 @@ class DistractionDMCWrapper(DMCWrapper):
             environment_kwargs=environment_kwargs,
             channels_first=channels_first,
         )
-
-        assert self._obs_type in ["pixels", "both"], 'DistractionDMCWrapper only supports obs_type "pixels" or "both"'
 
         xml_model_string = common.read_model(domain_name + ".xml").decode("utf-8")
 

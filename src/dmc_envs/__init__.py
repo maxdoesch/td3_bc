@@ -6,7 +6,7 @@ import gymnasium.envs.registration
 
 import dm_control.suite as suite
 
-OBS_TYPE = "both"  # 'state', 'pixels', or 'both'
+OBS_TYPE = "pixels"  # 'state', 'pixels', or 'both'
 
 
 def make(
@@ -28,7 +28,6 @@ def make(
     assert obs_type in ["state", "pixels", "both"], "obs_type must be one of: state, pixels, both"
 
     if disctracting_control:
-        assert obs_type in ["both", "pixels"], "disctracting control only supports state or pixels observation types"
         env_id = "dmc_distraction_%s_%s_%s-v1" % (domain_name, task_name, seed)
     else:
         env_id = "dmc_%s_%s_%s-v1" % (domain_name, task_name, seed)
