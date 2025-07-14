@@ -1,10 +1,13 @@
 import os
-import wandb
 import argparse
 import gymnasium as gym
+import wandb
+
 from sbx import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize
-from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback, BaseCallback
+from stable_baselines3.common.callbacks import (
+    CallbackList, EvalCallback, CheckpointCallback, BaseCallback
+)
 from wandb.integration.sb3 import WandbCallback
 
 from expert_gen.hyperparameter import HYPERPARAMETERS
@@ -22,9 +25,13 @@ class VecNormalizeCallback(BaseCallback):
         if self.n_calls % self.save_freq == 0:
             path = os.path.join(self.save_path, f"vecnormalize_step_{self.n_calls}.pkl")
             self.vecnormalize_env.save(path)
-            if self.verbose > 0:
-                print(f"Saved VecNormalize to {path}")
+            if self.verbose:
+                print(f"Saved VecNormalize stats to {path}")
         return True
+
+
+def make_env(env_id):
+    return gym.make(env_id, obs_type="state")
 
 
 def main():
@@ -34,104 +41,93 @@ def main():
     parser.add_argument("--eval-envs", type=int, default=1,
                         help="Number of evaluation environments.")
     parser.add_argument("--eval-freq", type=int, default=10_000,
-                        help="Frequency of evaluation during training.")
+                        help="Evaluation frequency.")
     parser.add_argument("--n-eval-episodes", type=int, default=5,
-                        help="Number of episodes to evaluate during each evaluation.")
+                        help="Episodes per evaluation.")
     parser.add_argument("--checkpoint-freq", type=int, default=100_000,
-                        help="Frequency of saving model checkpoints.")
-    parser.add_argument("--output-dir", type=str, default="checkpoints/expert_models",)
+                        help="Checkpoint frequency.")
+    parser.add_argument("--output-dir", type=str, default="checkpoints/expert_models",
+                        help="Output directory for logs and models.")
     args = parser.parse_args()
+
+    hparams = HYPERPARAMETERS[args.env_id]
 
     run = wandb.init(
         project="dmc-expert-gen",
         name=f"ppo-{args.env_id}",
-        config={
-            "env_id": args.env_id,
-            "hyperparameters": HYPERPARAMETERS.get(args.env_id, {}),
-        },
+        config={"env_id": args.env_id, "hyperparameters": hparams},
         sync_tensorboard=True,
         monitor_gym=True,
     )
 
-    def make_env():
-        env = gym.make(args.env_id, obs_type="state")
-        return env
-
     run_path = os.path.join(args.output_dir, f'run-{args.env_id}-{run.id}')
-    os.makedirs(run_path, exist_ok=True)
-    os.makedirs(os.path.join(run_path, "vecnormalize_checkpoints"), exist_ok=True)
+    vecnorm_path = os.path.join(run_path, "vecnormalize_checkpoints")
+    os.makedirs(vecnorm_path, exist_ok=True)
 
-    train_env = DummyVecEnv([make_env for _ in range(HYPERPARAMETERS[args.env_id]["n_envs"])])
-    train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True) if HYPERPARAMETERS[args.env_id]['normalize'] else train_env
-    train_env = VecMonitor(train_env, f"{run_path}/monitor.csv")
+    # Training environment
+    train_env = DummyVecEnv([lambda: make_env(args.env_id) for _ in range(hparams["n_envs"])])
+    train_env = VecMonitor(train_env, filename=os.path.join(run_path, "monitor.csv"))
+    if hparams.get("normalize", False):
+        train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True)
 
-    eval_env = DummyVecEnv([make_env for _ in range(args.eval_envs)])
-    if HYPERPARAMETERS[args.env_id]['normalize']:
+    # Evaluation environment
+    eval_env = DummyVecEnv([lambda: make_env(args.env_id) for _ in range(args.eval_envs)])
+    eval_env = VecMonitor(eval_env, filename=os.path.join(run_path, "eval_monitor.csv"))
+    if hparams.get("normalize", False):
         eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False)
         eval_env.training = False
         eval_env.norm_reward = False
         eval_env.obs_rms = train_env.obs_rms
-    eval_env = VecMonitor(eval_env, f"{run_path}/eval_monitor.csv")
 
-    eval_callback = EvalCallback(
-        eval_env,
-        best_model_save_path=f"{run_path}/best",
-        log_path=f"{run_path}/eval_logs",
-        eval_freq=args.eval_freq,
-        n_eval_episodes=args.n_eval_episodes,
-        deterministic=True,
-        render=False,
-    )
-
-    checkpoint_callback = CheckpointCallback(
-        save_freq=args.checkpoint_freq,
-        save_path=f"{run_path}/checkpoints",
-        name_prefix="ppo_model",
-    )
-
-    wandb_callback = WandbCallback(
-        gradient_save_freq=100,
-    )
-
-    vecnormalize_callback = VecNormalizeCallback(
-        vecnormalize_env=train_env,
-        save_path=os.path.join(run_path, "vecnormalize_checkpoints"),
-        save_freq=args.checkpoint_freq,
-    )
-
+    # Callbacks
     callbacks = CallbackList([
-        eval_callback,
-        checkpoint_callback,
-        wandb_callback,
-        vecnormalize_callback,
+        EvalCallback(
+            eval_env,
+            best_model_save_path=os.path.join(run_path, "best"),
+            log_path=os.path.join(run_path, "eval_logs"),
+            eval_freq=args.eval_freq,
+            n_eval_episodes=args.n_eval_episodes,
+            deterministic=True,
+        ),
+        CheckpointCallback(
+            save_freq=args.checkpoint_freq,
+            save_path=os.path.join(run_path, "checkpoints"),
+            name_prefix="ppo_model"
+        ),
+        WandbCallback(gradient_save_freq=100),
+        VecNormalizeCallback(
+            vecnormalize_env=train_env,
+            save_path=vecnorm_path,
+            save_freq=args.checkpoint_freq
+        ),
     ])
 
+    # Model training
     model = PPO(
-        policy=HYPERPARAMETERS[args.env_id]["policy"],
+        policy=hparams["policy"],
         env=train_env,
-        learning_rate=HYPERPARAMETERS[args.env_id]["learning_rate"],
-        n_steps=HYPERPARAMETERS[args.env_id]["n_steps"],
-        batch_size=HYPERPARAMETERS[args.env_id]["batch_size"],
-        n_epochs=HYPERPARAMETERS[args.env_id]["n_epochs"],
-        gamma=HYPERPARAMETERS[args.env_id]["gamma"],
-        gae_lambda=HYPERPARAMETERS[args.env_id]["gae_lambda"],
-        ent_coef=HYPERPARAMETERS[args.env_id]["ent_coef"],
-        clip_range=HYPERPARAMETERS[args.env_id]["clip_range"],
-        max_grad_norm=HYPERPARAMETERS[args.env_id]["max_grad_norm"],
-        policy_kwargs=HYPERPARAMETERS[args.env_id]["policy_kwargs"],
-        vf_coef=HYPERPARAMETERS[args.env_id]["vf_coef"],
+        learning_rate=hparams["learning_rate"],
+        n_steps=hparams["n_steps"],
+        batch_size=hparams["batch_size"],
+        n_epochs=hparams["n_epochs"],
+        gamma=hparams["gamma"],
+        gae_lambda=hparams["gae_lambda"],
+        ent_coef=hparams["ent_coef"],
+        clip_range=hparams["clip_range"],
+        max_grad_norm=hparams["max_grad_norm"],
+        policy_kwargs=hparams["policy_kwargs"],
+        vf_coef=hparams["vf_coef"],
         verbose=1,
         tensorboard_log=run_path,
     )
 
     model.learn(
-        total_timesteps=HYPERPARAMETERS[args.env_id]["n_timesteps"],
+        total_timesteps=hparams["n_timesteps"],
         callback=callbacks,
     )
 
     train_env.close()
     eval_env.close()
-
     run.finish()
 
 
