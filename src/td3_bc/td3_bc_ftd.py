@@ -1,5 +1,6 @@
 import os
 import copy
+import time
 import logging
 from dataclasses import dataclass
 
@@ -14,21 +15,27 @@ from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
 
 @dataclass
 class TD3BC_FTD_Base_Config(TD3BC_Base_Config):
-    num_regions: int = 9              # Maximum number of segmented regions
-    num_channels: int = 3             # Number of input channels
-    num_stack: int = 3                # Number of frames stacked together as a single observation
-    num_selector_layers: int = 5      # Number of convolutional layers in the attention selector
-    num_filters: int = 32             # Number of filters in the convolutional layers
-    embed_dim: int = 128              # Dimension of the embedding space for attention
-    num_attention_heads: int = 4      # Number of attention heads
-    num_shared_layers: int = 11       # Number of shared convolutional layers
-    num_head_layers: int = 0          # Number of hidden layers in the head CNN
-    projection_dim: int = 100         # Dimension of the projection space for actor and critic; must match actor and critic input dim
-    predictor_hidden_dim: int = 1024  # Hidden dimension for auxiliary predictors
-    reward_factor: float = 1.0        # Scaling factor for the reward prediction loss
-    inverse_factor: float = 1.0       # Scaling factor for the inverse dynamics prediction loss
-    max_grad_norm: float = 5.0        # Maximum gradient norm for clipping predictor gradients, 0 means no clipping
-    predictors_lr: float = 1e-4       # Learning rate for the auxiliary predictors
+    num_regions: int = 9                # Maximum number of segmented regions
+    num_channels: int = 3               # Number of input channels
+    num_stack: int = 3                  # Number of frames stacked together as a single observation
+    num_selector_layers: int = 5        # Number of convolutional layers in the attention selector
+    num_filters: int = 32               # Number of filters in the convolutional layers
+    embed_dim: int = 128                # Dimension of the embedding space for attention
+    num_attention_heads: int = 4        # Number of attention heads
+    num_shared_layers: int = 11         # Number of shared convolutional layers
+    num_head_layers: int = 0            # Number of hidden layers in the head CNN
+    projection_dim: int = 100           # Dimension of the projection space for actor and critic; must match actor and critic input dim
+    predictor_hidden_dim: int = 1024    # Hidden dimension for auxiliary predictors
+    reward_factor: float = 1.0          # Scaling factor for the reward prediction loss
+    inverse_factor: float = 1.0         # Scaling factor for the inverse dynamics prediction loss
+    max_grad_norm: float = 5.0          # Maximum gradient norm for clipping predictor gradients, 0 means no clipping
+    predictors_lr: float = 1e-4         # Learning rate for the auxiliary predictors
+
+    # Update frequencies:
+    actor_update_freq: int = 2                  # Frequency of actor updates
+    predictors_update_freq: int = 1             # Frequency of auxiliary predictors updates
+    predictors_update_slow_freq: int = 50_000   # Frequency of slow updates for auxiliary predictors
+    predictors_warmup_steps: int = 10_000       # Number of warmup steps before updating auxiliary predictors
 
     def get_shared_layers_config(self):
         return policies.SharedFTDLayersConfig(
@@ -59,6 +66,8 @@ class TD3BC_FTD_Base(TD3BC_Base):
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
+        self.total_it = 0
+
         # === Configuration ===
 
         self.num_regions = cfg.num_regions
@@ -72,6 +81,11 @@ class TD3BC_FTD_Base(TD3BC_Base):
         self.policy_noise = cfg.policy_noise * self.max_action
         self.noise_clip = cfg.noise_clip * self.max_action
         self.alpha = cfg.alpha
+
+        self.actor_update_freq = cfg.actor_update_freq
+        self.predictors_update_freq = cfg.predictors_update_freq
+        self.predictors_update_slow_freq = cfg.predictors_update_slow_freq
+        self.predictors_warmup_steps = cfg.predictors_warmup_steps
 
         # === Layers ===
 
@@ -183,18 +197,59 @@ class TD3BC_FTD_Base(TD3BC_Base):
         self.actor.load_state_dict(checkpoint["actor_state_dict"])
         self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
         self.actor_target = copy.deepcopy(self.actor)
-        
+
         self.critic.load_state_dict(checkpoint["critic_state_dict"])
         self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
         self.critic_target = copy.deepcopy(self.critic)
-        
+
         self.reward_predictor.load_state_dict(checkpoint["reward_predictor_state_dict"])
         self.reward_predictor_optimizer.load_state_dict(checkpoint["reward_predictor_optimizer_state_dict"])
-        
+
         self.inverse_dynamic_predictor.load_state_dict(checkpoint["inverse_dynamic_predictor_state_dict"])
         self.inverse_dynamic_predictor_optimizer.load_state_dict(checkpoint["inverse_dynamic_predictor_optimizer_state_dict"])
 
         logging.debug(f"Model parameters loaded from: {file_path}.")
 
     def train_step(self, batch: dict[str, torch.Tensor]) -> dict[str, float | np.ndarray]:
-        pass
+        metrics = {}
+        start_time = time.time()
+        self.total_it += 1
+
+        # Slow down the update frequency of the predictors
+        if self.total_it > self.predictors_warmup_steps and self.total_it % self.predictors_update_slow_freq == 0:
+            self.unsupervised_update_freq = self.unsupervised_update_freq + 1
+            logging.debug(f"Slowing predictors update frequency to {self.unsupervised_update_freq}.")
+
+        # Update critic
+        critic_loss, avg_q1, avg_q2 = self.update_critic(**batch)
+
+        metrics["train/critic_loss"] = critic_loss
+        metrics["train/avg_q1"] = avg_q1
+        metrics["train/avg_q2"] = avg_q2
+
+        # Update actor
+        if self.total_it % self.actor_update_freq == 0:
+            actions_taken, actor_loss, bc_loss, _ = self.update_actor(batch["obs"], batch["action"])
+
+            metrics["train/actor_loss"] = actor_loss
+            metrics["train/bc_loss"] = bc_loss
+            metrics["train/actions_taken"] = actions_taken
+
+            # Update the frozen target models
+            self.update_critic_target()
+            self.update_actor_target()
+
+        # Update auxiliary predictors
+        if self.total_it > self.predictors_warmup_steps and self.total_it % self.predictors_update_freq == 0:
+
+            if self.reward_factor != 0.0:
+                reward_predictor_loss = self.update_reward_predictor(batch["obs"], batch["action"], batch["reward"])
+                metrics["train/reward_predictor_loss"] = reward_predictor_loss
+
+            if self.inverse_factor != 0.0:
+                inverse_dynamic_loss = self.update_inverse_dynamic_predictor(batch["obs"], batch["action"], batch["next_obs"])
+                metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
+
+        metrics["train/time"] = time.time() - start_time
+
+        return metrics
