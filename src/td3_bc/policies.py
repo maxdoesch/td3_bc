@@ -107,6 +107,18 @@ class MlpCritic(BaseCritic):
         sa = torch.cat([obs, action], dim=-1)
         return self.critic2(sa)
 
+class CnnEncoder(nn.Module):
+    def __init__(self, obs_shape: Tuple[int, int, int], hidden_dim: int):
+        super().__init__()
+        c = obs_shape[2]
+        self.encoder = nn.Sequential(
+            nn.Conv2d(c, hidden_dim, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(hidden_dim, hidden_dim * 2, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Flatten()
+        )
+
 
 class CnnEncoder(nn.Module):
     def __init__(self, obs_shape: Tuple[int, int, int], hidden_dim: int):
