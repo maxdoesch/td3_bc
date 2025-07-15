@@ -6,13 +6,12 @@ from .modules import weight_init
 
 class RewardPredictor(nn.Module):
 
-    def __init__(self, encoder, action_shape, accumulate_steps, hidden_dim, num_filters=32):
+    def __init__(self, encoder, action_dim, hidden_dim):
         super().__init__()
-        self.num_filters = num_filters
 
         self.encoder = encoder
         self.mlp = nn.Sequential(
-            nn.Linear(self.encoder.out_dim + action_shape[0] * accumulate_steps, hidden_dim), nn.ReLU(),
+            nn.Linear(self.encoder.out_dim + action_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, 1)
         )
@@ -29,24 +28,23 @@ class RewardPredictor(nn.Module):
 
 class InverseDynamicPredictor(nn.Module):
 
-    def __init__(self, encoder, action_shape, accumulate_steps, hidden_dim, num_filters=32):
+    def __init__(self, encoder, action_dim, hidden_dim):
         super().__init__()
-        self.num_filters = num_filters
 
         self.encoder = encoder
         self.mlp = nn.Sequential(
-            nn.Linear(self.encoder.out_dim * 2 + (accumulate_steps - 1) * action_shape[0], hidden_dim), nn.ReLU(),
+            nn.Linear(self.encoder.out_dim * 2, hidden_dim), nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
-            nn.Linear(hidden_dim, action_shape[0])
+            nn.Linear(hidden_dim, action_dim)
         )
 
         self.mlp.apply(weight_init)
 
-    def forward(self, x, next_x, pre_actions):
+    def forward(self, x, next_x):
         x = self.encoder(x)
         next_x = self.encoder(next_x)
 
-        x = torch.cat((x, next_x, pre_actions), dim=1)
+        x = torch.cat((x, next_x), dim=1)
         x = self.mlp(x)
 
         return x

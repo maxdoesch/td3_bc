@@ -4,30 +4,28 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-import td3_bc.policies as policies
-from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
 import td3_bc.ftd.auxiliary_pred as aux
+from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
+import td3_bc.policies as policies
 
 
 @dataclass
 class TD3BC_FTD_Base_Config(TD3BC_Base_Config):
-    num_regions: int                  # Maximum number of segmented regions
-    num_channels: int                 # Number of input channels
-    num_stack: int                    # Number of frames stacked together as a single observation
-    num_selector_layers: int          # Number of convolutional layers in the attention selector
-    num_filters: int                  # Number of filters in the convolutional layers
-    embed_dim: int                    # Dimension of the embedding space for attention
-    num_attention_heads: int          # Number of attention heads
-    num_shared_layers: int            # Number of shared convolutional layers
-    num_head_layers: int              # Number of hidden layers in the head CNN
-    projection_dim: int               # Dimension of the projection space for actor and critic; must match actor and critic input dim
-    predictor_hidden_dim: int         # Hidden dimension for auxiliary predictors
-    reward_factor: float              # Scaling factor for the reward prediction loss
-    inverse_factor: float             # Scaling factor for the inverse dynamics prediction loss
-    max_grad_norm: float              # Maximum gradient norm for clipping predictor gradients, 0 means no clipping
-    predictors_lr: float              # Learning rate for the auxiliary predictors
-    reward_accumulate_steps: int = 1  # Number of steps to accumulate for Reward prediction - Not Used
-    inv_accumulate_steps: int = 1     # Number of steps to accumulate for inverse dynamics prediction - Not Used
+    num_regions: int = 9              # Maximum number of segmented regions
+    num_channels: int = 3             # Number of input channels
+    num_stack: int = 3                # Number of frames stacked together as a single observation
+    num_selector_layers: int = 5      # Number of convolutional layers in the attention selector
+    num_filters: int = 32             # Number of filters in the convolutional layers
+    embed_dim: int = 128              # Dimension of the embedding space for attention
+    num_attention_heads: int = 4      # Number of attention heads
+    num_shared_layers: int = 11       # Number of shared convolutional layers
+    num_head_layers: int = 0          # Number of hidden layers in the head CNN
+    projection_dim: int = 100         # Dimension of the projection space for actor and critic; must match actor and critic input dim
+    predictor_hidden_dim: int = 1024  # Hidden dimension for auxiliary predictors
+    reward_factor: float = 1.0        # Scaling factor for the reward prediction loss
+    inverse_factor: float = 1.0       # Scaling factor for the inverse dynamics prediction loss
+    max_grad_norm: float = 5.0        # Maximum gradient norm for clipping predictor gradients, 0 means no clipping
+    predictors_lr: float = 1e-4       # Learning rate for the auxiliary predictors
 
     def get_shared_layers_config(self):
         return policies.SharedFTDLayersConfig(
@@ -62,8 +60,6 @@ class TD3BC_FTD_Base(TD3BC_Base):
 
         self.num_regions = cfg.num_regions
         self.num_channels = cfg.num_channels
-        self.reward_accumulate_steps = cfg.reward_accumulate_steps
-        self.inv_accumulate_steps = cfg.inv_accumulate_steps
         self.reward_factor = cfg.reward_factor
         self.inverse_factor = cfg.inverse_factor
         self.max_grad_norm = cfg.max_grad_norm
@@ -84,12 +80,13 @@ class TD3BC_FTD_Base(TD3BC_Base):
 
         # === Auxiliary Predictors ===
 
-        self.reward_predictor = aux.RewardPredictor(self.critic.encoder, (action_dim,), cfg.reward_accumulate_steps,
-                                                    cfg.predictor_hidden_dim, cfg.num_filters).to(self.device)
+        self.reward_predictor = aux.RewardPredictor(self.critic.encoder,
+                                                    action_dim,
+                                                    cfg.predictor_hidden_dim).to(self.device)
 
-        self.inverse_dynamic_predictor = aux.InverseDynamicPredictor(self.critic.encoder, (action_dim,),
-                                                                     cfg.inv_accumulate_steps,
-                                                                     cfg.predictor_hidden_dim, cfg.num_filters).to(self.device)
+        self.inverse_dynamic_predictor = aux.InverseDynamicPredictor(self.critic.encoder,
+                                                                     action_dim,
+                                                                     cfg.predictor_hidden_dim).to(self.device)
 
         # === Optimizers ===
 
@@ -100,18 +97,17 @@ class TD3BC_FTD_Base(TD3BC_Base):
 
     def update_reward_predictor(self, obs, action, reward):
         """
-        Update the reward predictor using the sampled observations, actions, and rewards.
-        **Work in progress**
+        Update the reward predictor using the MSE loss between the predicted and actual rewards.
+        :param obs: Observations of shape (batch_size, num_stack * (num_regions + 1) * num_channels, height, width).
+        :param action: Actions of shape (batch_size, action_dim).
+        :param reward: Actual rewards of shape (batch_size, 1).
         """
-        concatenated_action = torch.concatenate(action, dim=1)
-        concatenated_reward = torch.sum(torch.concatenate(reward, dim=1), dim=1, keepdim=True)
-        predicted_reward = self.reward_predictor(obs, concatenated_action)
-        predict_loss = self.reward_factor * \
-            F.mse_loss(concatenated_reward, predicted_reward)
+        predicted_reward = self.reward_predictor(obs, action)  # Shape: (batch_size, 1)
+        predict_loss = self.reward_factor * F.mse_loss(reward, predicted_reward)
 
         self.reward_predictor_optimizer.zero_grad()
         predict_loss.backward()
-        if self.max_grad_norm != 0:
+        if self.max_grad_norm != 0.0:
             torch.nn.utils.clip_grad_norm_(self.reward_predictor.parameters(), self.max_grad_norm)
         self.reward_predictor_optimizer.step()
 
@@ -119,27 +115,36 @@ class TD3BC_FTD_Base(TD3BC_Base):
 
     def update_inverse_dynamic_predictor(self, obs, action, next_obs):
         """
-        Update the inverse dynamic predictor using the sampled observations, actions, and next observations.
-        **Work in progress**
+        Update the inverse dynamic predictor using the MSE loss between the predicted and actual actions.
+        :param obs: Current observations of shape (batch_size, num_stack * (num_regions + 1) * num_channels, height, width).
+        :param next_obs: Next observations of shape (batch_size, num_stack * (num_regions + 1) * num_channels, height, width).
+        :param action: Actions of shape (batch_size, action_dim).
         """
-        concatenated_pre_action = torch.concatenate(action[:-1], dim=1) if len(action) > 1 else torch.tensor([]).to(self.device)
-        predicted_action = self.inverse_dynamic_predictor(obs, next_obs, concatenated_pre_action)
-        predict_loss = self.inverse_factor * \
-            F.mse_loss(action[-1], predicted_action)
+        predicted_action = self.inverse_dynamic_predictor(obs, next_obs)  # Shape: (batch_size, action_dim)
+        predict_loss = self.inverse_factor * F.mse_loss(action, predicted_action)
 
         self.inverse_dynamic_predictor_optimizer.zero_grad()
         predict_loss.backward()
-        if self.max_grad_norm != 0:
+        if self.max_grad_norm != 0.0:
             torch.nn.utils.clip_grad_norm_(self.inverse_dynamic_predictor.parameters(), self.max_grad_norm)
         self.inverse_dynamic_predictor_optimizer.step()
 
         return predict_loss.item()
 
     def _obs_to_input(self, obs) -> torch.Tensor:
-        _obs = torch.FloatTensor(obs).to(self.device)
-        if len(_obs.shape) == 3:
-            _obs = _obs.unsqueeze(0)  # Add batch dimension
-        return _obs
+        if isinstance(obs, np.ndarray):
+            obs = torch.FloatTensor(obs).to(self.device)
+        elif isinstance(obs, torch.Tensor):
+            obs = obs.to(self.device)
+        else:
+            raise TypeError(f"Unsupported observation type: {type(obs)}. Expected np.ndarray or torch.Tensor.")
+        if len(obs.shape) == 3:
+            obs = obs.unsqueeze(0)  # Add batch dimension
+
+        assert len(obs.shape) == 4, f"Expected observation shape to be (batch_size, channels, height, width), got {obs.shape}"
+        assert obs.shape[0] == 1, f"Expected batch size of 1, got {obs.shape[0]}"
+
+        return obs
 
     def select_image(self, obs):
         with torch.no_grad():
@@ -147,4 +152,8 @@ class TD3BC_FTD_Base(TD3BC_Base):
             obs, logits = self.complete_selector(current_obs, return_all=True)
             selected_obs = torch.squeeze(obs)[-self.num_channels:].cpu().numpy()
             logits = logits.reshape(-1, self.num_regions)[-1].cpu().detach().tolist()
+            print(f"Selected observation shape: {selected_obs.shape}")
             return logits, np.transpose(selected_obs * 255, (1, 2, 0)).astype(np.uint8)
+
+    def train_step(self, batch: dict[str, torch.Tensor]) -> dict[str, float | np.ndarray]:
+        pass

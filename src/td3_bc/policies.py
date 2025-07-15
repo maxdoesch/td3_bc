@@ -213,18 +213,18 @@ class SharedFTDLayers(nn.Module):
     def __init__(
         self,
         obs_shape: tuple[int, int, int],
-        cfg: SharedFTDLayersConfig = SharedFTDLayersConfig()
+        cfg: SharedFTDLayersConfig
     ):
         super().__init__()
         self.cfg = cfg
 
-        selector_layers = ImageAttentionSelectorLayers(
+        self.selector_layers = ImageAttentionSelectorLayers(
             obs_shape, cfg.num_regions, cfg.num_channels,
             cfg.num_stack, cfg.num_selector_layers,
             cfg.num_filters, cfg.embed_dim, cfg.num_attention_heads)
 
         self.selector_cnn = m.SelectorCNN(
-            selector_layers, obs_shape, cfg.num_regions,
+            self.selector_layers, obs_shape, cfg.num_regions,
             cfg.num_channels, cfg.num_stack,
             cfg.num_shared_layers, cfg.num_filters)
 
