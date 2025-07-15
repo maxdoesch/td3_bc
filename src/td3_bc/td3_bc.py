@@ -48,11 +48,11 @@ class BaseAgent(ABC):
 
 class DummyAgent(BaseAgent):
     def __init__(
-            self, 
-            obs_shape: Union[int, Tuple[int, ...]], 
-            action_dim: int, 
-            max_action: float
-        ):
+        self,
+        obs_shape: Union[int, Tuple[int, ...]],
+        action_dim: int,
+        max_action: float
+    ):
 
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
@@ -300,14 +300,14 @@ class TD3BC_Online(TD3BC):
 
 
 def get_td3_bc_agent(
-    obs_shape: Union[int, Tuple[int]], 
-    action_dim: int, 
-    max_action: float, 
-    train_steps: int, 
-    cfg: TD3BC_Base_Config, 
+    obs_shape: Union[int, Tuple[int]],
+    action_dim: int,
+    max_action: float,
+    train_steps: int,
+    cfg: TD3BC_Base_Config,
     device: str
 ) -> TD3BC_Base:
-    
+
     if type(cfg) is TD3BC_Config:
         return TD3BC(obs_shape, action_dim, max_action, cfg, device)
     elif type(cfg) is TD3BC_Refine_Config:
