@@ -1,12 +1,15 @@
-from dataclasses import dataclass
+import os
 import copy
+import logging
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 import torch.nn.functional as F
 
+import td3_bc.policies as policies
 import td3_bc.ftd.auxiliary_pred as aux
 from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
-import td3_bc.policies as policies
 
 
 @dataclass
@@ -154,6 +157,44 @@ class TD3BC_FTD_Base(TD3BC_Base):
             logits = logits.reshape(-1, self.num_regions)[-1].cpu().detach().tolist()
             print(f"Selected observation shape: {selected_obs.shape}")
             return logits, np.transpose(selected_obs * 255, (1, 2, 0)).astype(np.uint8)
+
+    def save(self, dir_path: str):
+        file_path = os.path.join(dir_path, "td3_bc_ftd.pt")
+        torch.save(
+            {
+                "actor_state_dict": self.actor.state_dict(),
+                "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+                "critic_state_dict": self.critic.state_dict(),
+                "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+                "reward_predictor_state_dict": self.reward_predictor.state_dict(),
+                "reward_predictor_optimizer_state_dict": self.reward_predictor_optimizer.state_dict(),
+                "inverse_dynamic_predictor_state_dict": self.inverse_dynamic_predictor.state_dict(),
+                "inverse_dynamic_predictor_optimizer_state_dict": self.inverse_dynamic_predictor_optimizer.state_dict()
+            },
+            file_path,
+        )
+
+        logging.debug(f"Model parameters saved to: {file_path}.")
+
+    def load(self, dir_path: str):
+        file_path = os.path.join(dir_path, "td3_bc_ftd.pt")
+        checkpoint = torch.load(file_path)
+
+        self.actor.load_state_dict(checkpoint["actor_state_dict"])
+        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
+        self.actor_target = copy.deepcopy(self.actor)
+        
+        self.critic.load_state_dict(checkpoint["critic_state_dict"])
+        self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
+        self.critic_target = copy.deepcopy(self.critic)
+        
+        self.reward_predictor.load_state_dict(checkpoint["reward_predictor_state_dict"])
+        self.reward_predictor_optimizer.load_state_dict(checkpoint["reward_predictor_optimizer_state_dict"])
+        
+        self.inverse_dynamic_predictor.load_state_dict(checkpoint["inverse_dynamic_predictor_state_dict"])
+        self.inverse_dynamic_predictor_optimizer.load_state_dict(checkpoint["inverse_dynamic_predictor_optimizer_state_dict"])
+
+        logging.debug(f"Model parameters loaded from: {file_path}.")
 
     def train_step(self, batch: dict[str, torch.Tensor]) -> dict[str, float | np.ndarray]:
         pass
