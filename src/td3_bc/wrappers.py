@@ -14,16 +14,15 @@ class FTDObservationWrapperConfig:
     sam_config: MobileSAMV2Config = MobileSAMV2Config()
 
     # FTD parameters
-    num_regions: int = 10               # Number of segmented regions
-    num_channels: int = 3               # Number of input channels
-    add_original_frame: bool = True     # Whether to add the original frame as the last channel
+    num_regions: int = 10  # Number of segmented regions
+    num_channels: int = 3  # Number of input channels
+    add_original_frame: bool = True  # Whether to add the original frame as the last channel
 
     # Mask sorting
-    sort_by: str = "area"               # Mode for sorting masks (e.g., 'area', 'score')
+    sort_by: str = "area"  # Mode for sorting masks (e.g., 'area', 'score')
 
 
 class FTDObservationWrapper(gym.ObservationWrapper):
-
     def __init__(self, env, config: FTDObservationWrapperConfig = FTDObservationWrapperConfig()):
         gym.ObservationWrapper.__init__(self, env)
 
@@ -39,7 +38,9 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         # Set new observation space
         old_shape = env.observation_space.shape
         assert len(old_shape) == 3, "Observation space must be a 3D space (C, H, W)"
-        assert old_shape[0] == config.num_channels, f"Expected {config.num_channels} channels in observation space, got {old_shape[0]}"
+        assert old_shape[0] == config.num_channels, (
+            f"Expected {config.num_channels} channels in observation space, got {old_shape[0]}"
+        )
         self.H, self.W = old_shape[1:]
         self.num_regions_with_original = config.num_regions + int(config.add_original_frame)
 
@@ -47,7 +48,7 @@ class FTDObservationWrapper(gym.ObservationWrapper):
             low=0,
             high=255,
             shape=((config.num_channels * self.num_regions_with_original, self.H, self.W)),  # (C * R, H, W)
-            dtype=np.uint8
+            dtype=np.uint8,
         )
 
     def __get_predictions(self, observation: torch.Tensor) -> dict[str, torch.Tensor]:
@@ -58,7 +59,7 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         image = np.array(observation)
         if image.shape[0] == 1:
             image = np.concatenate([image, image, image], axis=0)
-            
+
         image = np.transpose(image, [1, 2, 0])
         pred = self.mobilesamv2.get_prediction(image)
 
@@ -68,7 +69,7 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         """
         Get the sorted indices of the masks based on the specified sorting mode (either area or score).
         """
-        masks, scores = pred['masks'], pred['scores']  # (N, H, W), (N,)
+        masks, scores = pred["masks"], pred["scores"]  # (N, H, W), (N,)
 
         if self.config.sort_by == "area":
             areas = torch.sum(masks, dim=(1, 2))
@@ -83,19 +84,20 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         Pad masks with black regions or trim excess masks to ensure the number of masks matches num_regions.
         """
         if masks.shape[0] < self.config.num_regions:
-            pad = torch.zeros((self.config.num_regions - masks.shape[0], self.H, self.W), device=masks.device, dtype=masks.dtype)
+            pad = torch.zeros(
+                (self.config.num_regions - masks.shape[0], self.H, self.W), device=masks.device, dtype=masks.dtype
+            )
             masks = torch.cat([masks, pad], dim=0)
         else:
-            masks = masks[:self.config.num_regions]
+            masks = masks[: self.config.num_regions]
 
         return masks
 
     def observation(self, observation):
-
         # Get Masks
         pred = self.__get_predictions(observation)
         sorted_indices = self.__sort_predictions(pred)
-        masks = pred['masks'][sorted_indices]
+        masks = pred["masks"][sorted_indices]
         masks = self.__pad_or_trim_masks(masks)
         masks = masks.float()  # (R, H, W)
 
@@ -151,7 +153,7 @@ class LazyFrames(object):
         return frames.shape[0] // 3
 
     def frame(self, i):
-        return self._force()[i * 3:(i + 1) * 3]
+        return self._force()[i * 3 : (i + 1) * 3]
 
 
 class FrameStack(gym.Wrapper):
@@ -163,10 +165,7 @@ class FrameStack(gym.Wrapper):
         self._frames = deque([], maxlen=k)
         shp = env.observation_space.shape
         self.observation_space = gym.spaces.Box(
-            low=0,
-            high=255,
-            shape=((shp[0] * k,) + shp[1:]),
-            dtype=env.observation_space.dtype
+            low=0, high=255, shape=((shp[0] * k,) + shp[1:]), dtype=env.observation_space.dtype
         )
 
     def reset(self):

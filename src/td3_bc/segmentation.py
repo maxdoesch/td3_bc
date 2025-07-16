@@ -13,11 +13,11 @@ from mobilesamv2 import sam_model_registry, SamPredictor
 
 @dataclass
 class MobileSAMV2Config:
-    image_size: int = 320                 # Size of the input image for segmentation
-    confidence_threshold: float = 0.5     # Confidence threshold for object detection
-    iou: float = 0.3                      # Intersection over Union threshold for filtering detections
+    image_size: int = 320  # Size of the input image for segmentation
+    confidence_threshold: float = 0.5  # Confidence threshold for object detection
+    iou: float = 0.3  # Intersection over Union threshold for filtering detections
     remove_fully_contained: bool = False  # Whether to remove fully contained masks from segmentation
-    batch_size: int = 256                 # Batch size for processing images
+    batch_size: int = 256  # Batch size for processing images
 
 
 class MobileSAMV2:
@@ -25,10 +25,10 @@ class MobileSAMV2:
     This class provides functionality to segment all objects in an input image using MobileSAMv2.
     """
 
-    MOBILE_SAM_V2_PATH = '/MobileSAM/MobileSAMv2'
-    PROMPT_GUIDED_PATH = os.path.join(MOBILE_SAM_V2_PATH, 'PromptGuidedDecoder/Prompt_guided_Mask_Decoder.pt')
-    OBJ_MODEL_PATH = os.path.join(MOBILE_SAM_V2_PATH, 'weight/ObjectAwareModel.pt')
-    IMAGE_ENCODER_CHECKPOINT_PATH = os.path.join(MOBILE_SAM_V2_PATH, 'weight/l2.pt')
+    MOBILE_SAM_V2_PATH = "/MobileSAM/MobileSAMv2"
+    PROMPT_GUIDED_PATH = os.path.join(MOBILE_SAM_V2_PATH, "PromptGuidedDecoder/Prompt_guided_Mask_Decoder.pt")
+    OBJ_MODEL_PATH = os.path.join(MOBILE_SAM_V2_PATH, "weight/ObjectAwareModel.pt")
+    IMAGE_ENCODER_CHECKPOINT_PATH = os.path.join(MOBILE_SAM_V2_PATH, "weight/l2.pt")
 
     COLORS = [
         [0.216, 0.494, 0.722],  # blue
@@ -65,8 +65,7 @@ class MobileSAMV2:
         """
         Enable or disable logging for the model.
         """
-        logging.getLogger("ultralytics").setLevel(
-            logging.INFO if enable else logging.ERROR)
+        logging.getLogger("ultralytics").setLevel(logging.INFO if enable else logging.ERROR)
 
     def assert_image_format(self, image: np.ndarray):
         assert isinstance(image, np.ndarray), "Input image must be a NumPy array."
@@ -75,22 +74,22 @@ class MobileSAMV2:
 
     def create_model(self):
         obj_aware_model = ObjectAwareModel(self.OBJ_MODEL_PATH)
-        mobilesamv2 = sam_model_registry['vit_h']()
-        prompt_guided_decoder = sam_model_registry['PromptGuidedDecoder'](self.PROMPT_GUIDED_PATH)
-        mobilesamv2.prompt_encoder = prompt_guided_decoder['PromtEncoder']
-        mobilesamv2.mask_decoder = prompt_guided_decoder['MaskDecoder']
-        mobilesamv2.image_encoder = sam_model_registry['efficientvit_l2'](self.IMAGE_ENCODER_CHECKPOINT_PATH)
+        mobilesamv2 = sam_model_registry["vit_h"]()
+        prompt_guided_decoder = sam_model_registry["PromptGuidedDecoder"](self.PROMPT_GUIDED_PATH)
+        mobilesamv2.prompt_encoder = prompt_guided_decoder["PromtEncoder"]
+        mobilesamv2.mask_decoder = prompt_guided_decoder["MaskDecoder"]
+        mobilesamv2.image_encoder = sam_model_registry["efficientvit_l2"](self.IMAGE_ENCODER_CHECKPOINT_PATH)
         return mobilesamv2, obj_aware_model
 
     @staticmethod
     def batch_iterator(batch_size: int, *args) -> Generator[list[any], None, None]:
-        assert len(args) > 0 and all(
-            len(a) == len(args[0]) for a in args
-        ), "Batched iteration must have inputs of all the same size."
+        assert len(args) > 0 and all(len(a) == len(args[0]) for a in args), (
+            "Batched iteration must have inputs of all the same size."
+        )
 
         n_batches = len(args[0]) // batch_size + int(len(args[0]) % batch_size != 0)
         for b in range(n_batches):
-            yield [arg[b * batch_size: (b + 1) * batch_size] for arg in args]
+            yield [arg[b * batch_size : (b + 1) * batch_size] for arg in args]
 
     @staticmethod
     def remove_fully_contained_masks(masks, threshold=0.95):
@@ -137,16 +136,20 @@ class MobileSAMV2:
         self.assert_image_format(image)
 
         obj_results = self.obj_aware_model(
-            image, device=self.device, retina_masks=True,
-            imgsz=self.image_size, conf=self.confidence_threshold, iou=self.iou
+            image,
+            device=self.device,
+            retina_masks=True,
+            imgsz=self.image_size,
+            conf=self.confidence_threshold,
+            iou=self.iou,
         )
 
         self.predictor.set_image(image)
 
         # Get bounding boxes and associated scores and labels
         input_boxes = obj_results[0].boxes.xyxy  # (N, 4)
-        scores = obj_results[0].boxes.conf        # (N,)
-        labels = obj_results[0].boxes.cls.int()   # (N,)
+        scores = obj_results[0].boxes.conf  # (N,)
+        labels = obj_results[0].boxes.cls.int()  # (N,)
 
         # Transform boxes for SAM
         input_boxes = input_boxes.cpu().numpy()
@@ -163,8 +166,8 @@ class MobileSAMV2:
         # Run segmentation in batches
         for (boxes,) in self.batch_iterator(self.batch_size, input_boxes):
             with torch.no_grad():
-                image_embedding_batch = image_embedding[0:boxes.shape[0], :, :, :]
-                prompt_embedding_batch = prompt_embedding[0:boxes.shape[0], :, :, :]
+                image_embedding_batch = image_embedding[0 : boxes.shape[0], :, :, :]
+                prompt_embedding_batch = prompt_embedding[0 : boxes.shape[0], :, :, :]
 
                 sparse_embeddings, dense_embeddings = self.mobilesamv2.prompt_encoder(
                     points=None, boxes=boxes, masks=None
@@ -198,12 +201,7 @@ class MobileSAMV2:
         # Get boxes from masks
         pred_boxes = masks_to_boxes(pred_masks)  # (N, 4)
 
-        return {
-            "boxes": pred_boxes,
-            "scores": scores,
-            "labels": labels,
-            "masks": pred_masks
-        }
+        return {"boxes": pred_boxes, "scores": scores, "labels": labels, "masks": pred_masks}
 
     @classmethod
     def get_segmented_image_from_masks(cls, image, masks):
@@ -230,7 +228,7 @@ class MobileSAMV2:
 
         return img  # shape (H, W, 3)
 
-    def test(self, image_path: str, output_path: str = './output.jpg') -> None:
+    def test(self, image_path: str, output_path: str = "./output.jpg") -> None:
         """
         Test the segmentation on a saved image.
 
@@ -240,23 +238,24 @@ class MobileSAMV2:
         """
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        all_masks = self.get_prediction(image)['masks']
+        all_masks = self.get_prediction(image)["masks"]
         segmented_image = self.get_segmented_image_from_masks(image, all_masks)
-        
+
         plt.imshow(segmented_image)
-        plt.axis('off')
-        plt.savefig(output_path, bbox_inches='tight', pad_inches=0.0)
+        plt.axis("off")
+        plt.savefig(output_path, bbox_inches="tight", pad_inches=0.0)
         plt.close()
 
 
 if __name__ == "__main__":
     # Don't put these imports outside of main.
     import matplotlib
-    matplotlib.use('Agg')  # Use non-interactive backend for saving figures
+
+    matplotlib.use("Agg")  # Use non-interactive backend for saving figures
     from matplotlib import pyplot as plt
 
     # Initialize the MobileSAMV2 model and test on a single image
     mobile_sam_v2 = MobileSAMV2()
-    test_image_path = '/MobileSAM/MobileSAMv2/test_images/1.jpg'
-    output_image_path = './output.jpg'
+    test_image_path = "/MobileSAM/MobileSAMv2/test_images/1.jpg"
+    output_image_path = "./output.jpg"
     mobile_sam_v2.test(test_image_path, output_image_path)

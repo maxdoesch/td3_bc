@@ -15,27 +15,29 @@ from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
 
 @dataclass
 class TD3BC_FTD_Base_Config(TD3BC_Base_Config):
-    num_regions: int = 9                # Maximum number of segmented regions
-    num_channels: int = 3               # Number of input channels
-    num_stack: int = 3                  # Number of frames stacked together as a single observation
-    num_selector_layers: int = 5        # Number of convolutional layers in the attention selector
-    num_filters: int = 32               # Number of filters in the convolutional layers
-    embed_dim: int = 128                # Dimension of the embedding space for attention
-    num_attention_heads: int = 4        # Number of attention heads
-    num_shared_layers: int = 11         # Number of shared convolutional layers
-    num_head_layers: int = 0            # Number of hidden layers in the head CNN
-    projection_dim: int = 100           # Dimension of the projection space for actor and critic; must match actor and critic input dim
-    predictor_hidden_dim: int = 1024    # Hidden dimension for auxiliary predictors
-    reward_factor: float = 1.0          # Scaling factor for the reward prediction loss
-    inverse_factor: float = 1.0         # Scaling factor for the inverse dynamics prediction loss
-    max_grad_norm: float = 5.0          # Maximum gradient norm for clipping predictor gradients, 0 means no clipping
-    predictors_lr: float = 1e-4         # Learning rate for the auxiliary predictors
+    num_regions: int = 9  # Maximum number of segmented regions
+    num_channels: int = 3  # Number of input channels
+    num_stack: int = 3  # Number of frames stacked together as a single observation
+    num_selector_layers: int = 5  # Number of convolutional layers in the attention selector
+    num_filters: int = 32  # Number of filters in the convolutional layers
+    embed_dim: int = 128  # Dimension of the embedding space for attention
+    num_attention_heads: int = 4  # Number of attention heads
+    num_shared_layers: int = 11  # Number of shared convolutional layers
+    num_head_layers: int = 0  # Number of hidden layers in the head CNN
+    projection_dim: int = (
+        100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
+    )
+    predictor_hidden_dim: int = 1024  # Hidden dimension for auxiliary predictors
+    reward_factor: float = 1.0  # Scaling factor for the reward prediction loss
+    inverse_factor: float = 1.0  # Scaling factor for the inverse dynamics prediction loss
+    max_grad_norm: float = 5.0  # Maximum gradient norm for clipping predictor gradients, 0 means no clipping
+    predictors_lr: float = 1e-4  # Learning rate for the auxiliary predictors
 
     # Update frequencies:
-    actor_update_freq: int = 2                  # Frequency of actor updates
-    predictors_update_freq: int = 1             # Frequency of auxiliary predictors updates
-    predictors_update_slow_freq: int = 50_000   # Frequency of slow updates for auxiliary predictors
-    predictors_warmup_steps: int = 10_000       # Number of warmup steps before updating auxiliary predictors
+    actor_update_freq: int = 2  # Frequency of actor updates
+    predictors_update_freq: int = 1  # Frequency of auxiliary predictors updates
+    predictors_update_slow_freq: int = 50_000  # Frequency of slow updates for auxiliary predictors
+    predictors_warmup_steps: int = 10_000  # Number of warmup steps before updating auxiliary predictors
 
     def get_shared_layers_config(self):
         return policies.SharedFTDLayersConfig(
@@ -48,12 +50,11 @@ class TD3BC_FTD_Base_Config(TD3BC_Base_Config):
             num_attention_heads=self.num_attention_heads,
             num_shared_layers=self.num_shared_layers,
             num_head_layers=self.num_head_layers,
-            projection_dim=self.projection_dim
+            projection_dim=self.projection_dim,
         )
 
 
 class TD3BC_FTD_Base(TD3BC_Base):
-
     def __init__(
         self,
         obs_shape: tuple[int, int, int],
@@ -90,27 +91,31 @@ class TD3BC_FTD_Base(TD3BC_Base):
         # === Layers ===
 
         shared_layers_config = cfg.get_shared_layers_config()
-        self.actor, self.critic = policies.policy_factory("ftd", obs_shape, action_dim, max_action, self.device, shared_layers_config)
+        self.actor, self.critic = policies.policy_factory(
+            "ftd", obs_shape, action_dim, max_action, self.device, shared_layers_config
+        )
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
 
         self.complete_selector = self.critic.shared_layers.selector_layers.to(self.device)
 
         # === Auxiliary Predictors ===
 
-        self.reward_predictor = aux.RewardPredictor(self.critic.encoder,
-                                                    action_dim,
-                                                    cfg.predictor_hidden_dim).to(self.device)
+        self.reward_predictor = aux.RewardPredictor(self.critic.encoder, action_dim, cfg.predictor_hidden_dim).to(
+            self.device
+        )
 
-        self.inverse_dynamic_predictor = aux.InverseDynamicPredictor(self.critic.encoder,
-                                                                     action_dim,
-                                                                     cfg.predictor_hidden_dim).to(self.device)
+        self.inverse_dynamic_predictor = aux.InverseDynamicPredictor(
+            self.critic.encoder, action_dim, cfg.predictor_hidden_dim
+        ).to(self.device)
 
         # === Optimizers ===
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
         self.reward_predictor_optimizer = torch.optim.Adam(self.reward_predictor.parameters(), lr=cfg.predictors_lr)
-        self.inverse_dynamic_predictor_optimizer = torch.optim.Adam(self.inverse_dynamic_predictor.parameters(), lr=cfg.predictors_lr)
+        self.inverse_dynamic_predictor_optimizer = torch.optim.Adam(
+            self.inverse_dynamic_predictor.parameters(), lr=cfg.predictors_lr
+        )
 
     def update_reward_predictor(self, obs, action, reward):
         """
@@ -158,7 +163,9 @@ class TD3BC_FTD_Base(TD3BC_Base):
         if len(obs.shape) == 3:
             obs = obs.unsqueeze(0)  # Add batch dimension
 
-        assert len(obs.shape) == 4, f"Expected observation shape to be (batch_size, channels, height, width), got {obs.shape}"
+        assert len(obs.shape) == 4, (
+            f"Expected observation shape to be (batch_size, channels, height, width), got {obs.shape}"
+        )
         assert obs.shape[0] == 1, f"Expected batch size of 1, got {obs.shape[0]}"
 
         return obs
@@ -167,7 +174,7 @@ class TD3BC_FTD_Base(TD3BC_Base):
         with torch.no_grad():
             current_obs = self._obs_to_input(obs)
             obs, logits = self.complete_selector(current_obs, return_all=True)
-            selected_obs = torch.squeeze(obs)[-self.num_channels:].cpu().numpy()
+            selected_obs = torch.squeeze(obs)[-self.num_channels :].cpu().numpy()
             logits = logits.reshape(-1, self.num_regions)[-1].cpu().detach().tolist()
             print(f"Selected observation shape: {selected_obs.shape}")
             return logits, np.transpose(selected_obs * 255, (1, 2, 0)).astype(np.uint8)
@@ -183,7 +190,7 @@ class TD3BC_FTD_Base(TD3BC_Base):
                 "reward_predictor_state_dict": self.reward_predictor.state_dict(),
                 "reward_predictor_optimizer_state_dict": self.reward_predictor_optimizer.state_dict(),
                 "inverse_dynamic_predictor_state_dict": self.inverse_dynamic_predictor.state_dict(),
-                "inverse_dynamic_predictor_optimizer_state_dict": self.inverse_dynamic_predictor_optimizer.state_dict()
+                "inverse_dynamic_predictor_optimizer_state_dict": self.inverse_dynamic_predictor_optimizer.state_dict(),
             },
             file_path,
         )
@@ -206,7 +213,9 @@ class TD3BC_FTD_Base(TD3BC_Base):
         self.reward_predictor_optimizer.load_state_dict(checkpoint["reward_predictor_optimizer_state_dict"])
 
         self.inverse_dynamic_predictor.load_state_dict(checkpoint["inverse_dynamic_predictor_state_dict"])
-        self.inverse_dynamic_predictor_optimizer.load_state_dict(checkpoint["inverse_dynamic_predictor_optimizer_state_dict"])
+        self.inverse_dynamic_predictor_optimizer.load_state_dict(
+            checkpoint["inverse_dynamic_predictor_optimizer_state_dict"]
+        )
 
         logging.debug(f"Model parameters loaded from: {file_path}.")
 
@@ -241,13 +250,14 @@ class TD3BC_FTD_Base(TD3BC_Base):
 
         # Update auxiliary predictors
         if self.total_it > self.predictors_warmup_steps and self.total_it % self.predictors_update_freq == 0:
-
             if self.reward_factor != 0.0:
                 reward_predictor_loss = self.update_reward_predictor(batch["obs"], batch["action"], batch["reward"])
                 metrics["train/reward_predictor_loss"] = reward_predictor_loss
 
             if self.inverse_factor != 0.0:
-                inverse_dynamic_loss = self.update_inverse_dynamic_predictor(batch["obs"], batch["action"], batch["next_obs"])
+                inverse_dynamic_loss = self.update_inverse_dynamic_predictor(
+                    batch["obs"], batch["action"], batch["next_obs"]
+                )
                 metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
 
         metrics["train/time"] = time.time() - start_time

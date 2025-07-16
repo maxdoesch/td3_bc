@@ -6,7 +6,6 @@ from .modules import NormalizeImg, Flatten, weight_init
 
 
 class ImageAttentionSelectorLayers(nn.Module):
-
     def __init__(self, obs_shape, region_num, in_channels, stack_num, num_layers, num_filters, embed_dim, num_heads):
         super().__init__()
 
@@ -26,7 +25,7 @@ class ImageAttentionSelectorLayers(nn.Module):
             self.layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
             self.current_image_size = self.current_image_size // 2
         self.layers.append(Flatten())
-        out_num = num_filters * self.current_image_size ** 2
+        out_num = num_filters * self.current_image_size**2
         self.layers.append(nn.Linear(out_num, embed_dim))
         self.layers = nn.Sequential(*self.layers)
         self.layers.apply(weight_init)
