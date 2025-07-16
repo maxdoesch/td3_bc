@@ -107,6 +107,7 @@ class MlpCritic(BaseCritic):
         sa = torch.cat([obs, action], dim=-1)
         return self.critic2(sa)
 
+
 class CnnEncoder(nn.Module):
     def __init__(self, obs_shape: Tuple[int, int, int], hidden_dim: int):
         super().__init__()
@@ -116,7 +117,7 @@ class CnnEncoder(nn.Module):
             nn.ReLU(),
             nn.Conv2d(hidden_dim, hidden_dim * 2, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Flatten()
+            nn.Flatten(),
         )
 
         # Calculate output dimension
@@ -127,7 +128,8 @@ class CnnEncoder(nn.Module):
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         obs = obs.permute(0, 3, 1, 2)  # (B, C, H, W)
         return self.encoder(obs)
-    
+
+
 class CnnActor(BaseActor):
     def __init__(self, encoder: CnnEncoder, action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
         super().__init__(encoder.output_dim, action_dim, hidden_dim, n_layers, max_action)
@@ -138,7 +140,7 @@ class CnnActor(BaseActor):
             nn.ReLU(),
             *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
             nn.Linear(hidden_dim, action_dim),
-            nn.Tanh()
+            nn.Tanh(),
         )
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
@@ -146,35 +148,30 @@ class CnnActor(BaseActor):
         action = self.fc(features) * self.max_action
         return action
 
+
 class CnnCritic(BaseCritic):
     def __init__(self, encoder: CnnEncoder, action_dim: int, hidden_dim: int, n_layers: int):
         super().__init__(encoder.output_dim, action_dim, hidden_dim, n_layers)
         self.encoder = encoder
 
         self.action_encoder1 = nn.Sequential(
-            nn.Linear(action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
+            nn.Linear(action_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim), nn.ReLU()
         )
         self.action_encoder2 = nn.Sequential(
-            nn.Linear(action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
+            nn.Linear(action_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim), nn.ReLU()
         )
 
         self.critic1 = nn.Sequential(
             nn.Linear(encoder.output_dim + hidden_dim, hidden_dim),
             nn.ReLU(),
             *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(hidden_dim, 1),
         )
         self.critic2 = nn.Sequential(
             nn.Linear(encoder.output_dim + hidden_dim, hidden_dim),
             nn.ReLU(),
             *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
-            nn.Linear(hidden_dim, 1)
+            nn.Linear(hidden_dim, 1),
         )
 
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -189,6 +186,7 @@ class CnnCritic(BaseCritic):
         obs_feat = self.encoder(obs)
         act_feat = self.action_encoder2(action)
         return self.critic2(torch.cat([obs_feat, act_feat], dim=-1))
+
 
 def policy_factory(name: str, obs_dim: int, action_dim: int, max_action: float, device) -> Tuple[BaseActor, BaseCritic]:
     if name == "mlp":
