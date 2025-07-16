@@ -1,6 +1,7 @@
 import draccus
 
 from td3_bc.trainer import get_trainer, TrainerConfig
+import dmc_envs
 
 
 @draccus.wrap()

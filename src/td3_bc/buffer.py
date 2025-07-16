@@ -16,7 +16,7 @@ class ReplayBuffer:
         self,
         obs_shape: Union[int, Tuple[int, ...]],
         action_dim: int,
-        max_size: int = int(1e7),
+        max_size: int = int(1e4),
         device: Optional[str] = None,
     ):
         self.max_size = max_size
@@ -157,8 +157,8 @@ class ReplayBuffer:
         self.not_done = self.not_done[: self.size]
 
     def convert_minari(self, dataset: minari.MinariDataset):
-        assert dataset.observation_space.shape[0] == self.obs.shape[-1], "Observation dimension mismatch."
-        assert dataset.action_space.shape[0] == self.action.shape[-1], "Action dimension mismatch."
+        assert dataset.observation_space.shape == self.obs_shape, "Observation dimension mismatch."
+        assert dataset.action_space.shape[0] == self.action_dim, "Action dimension mismatch."
 
         for episode in dataset.iterate_episodes():
             transition = {
