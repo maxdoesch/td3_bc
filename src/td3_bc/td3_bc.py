@@ -71,7 +71,9 @@ class TD3BC_Base(BaseAgent):
 
         obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
 
-        self.actor, self.critic = policies.policy_factory("mlp", obs_shape, action_dim, max_action, self.device)
+        policy_type = "mlp" if isinstance(obs_shape, int) or len(obs_shape) == 1 else "cnn"
+
+        self.actor, self.critic = policies.policy_factory(policy_type, obs_shape, action_dim, max_action, self.device)
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)

@@ -107,44 +107,101 @@ class MlpCritic(BaseCritic):
         sa = torch.cat([obs, action], dim=-1)
         return self.critic2(sa)
 
+class CnnEncoder(nn.Module):
+    def __init__(self, obs_shape: Tuple[int, int, int], hidden_dim: int):
+        super().__init__()
+        c = obs_shape[2]
+        self.encoder = nn.Sequential(
+            nn.Conv2d(c, hidden_dim, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(hidden_dim, hidden_dim * 2, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(),
+            nn.Flatten()
+        )
 
-class CnnActor(BaseActor):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
-        super().__init__(obs_dim, action_dim, hidden_dim, n_layers, max_action)
-
-        pass
+        # Calculate output dimension
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, *obs_shape).permute(0, 3, 1, 2)
+            self.output_dim = self.encoder(dummy_input).shape[1]
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        pass
+        obs = obs.permute(0, 3, 1, 2)  # (B, C, H, W)
+        return self.encoder(obs)
+    
+class CnnActor(BaseActor):
+    def __init__(self, encoder: CnnEncoder, action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
+        super().__init__(encoder.output_dim, action_dim, hidden_dim, n_layers, max_action)
+        self.encoder = encoder
 
+        self.fc = nn.Sequential(
+            nn.Linear(encoder.output_dim, hidden_dim),
+            nn.ReLU(),
+            *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
+            nn.Linear(hidden_dim, action_dim),
+            nn.Tanh()
+        )
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        features = self.encoder(obs)
+        action = self.fc(features) * self.max_action
+        return action
 
 class CnnCritic(BaseCritic):
-    def __init__(self, obs_dim: int, action_dim: int, hidden_dim: int, n_layers: int):
-        super().__init__(obs_dim, action_dim, hidden_dim, n_layers)
+    def __init__(self, encoder: CnnEncoder, action_dim: int, hidden_dim: int, n_layers: int):
+        super().__init__(encoder.output_dim, action_dim, hidden_dim, n_layers)
+        self.encoder = encoder
 
-        pass
+        self.action_encoder1 = nn.Sequential(
+            nn.Linear(action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        self.action_encoder2 = nn.Sequential(
+            nn.Linear(action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+
+        self.critic1 = nn.Sequential(
+            nn.Linear(encoder.output_dim + hidden_dim, hidden_dim),
+            nn.ReLU(),
+            *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
+            nn.Linear(hidden_dim, 1)
+        )
+        self.critic2 = nn.Sequential(
+            nn.Linear(encoder.output_dim + hidden_dim, hidden_dim),
+            nn.ReLU(),
+            *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
+            nn.Linear(hidden_dim, 1)
+        )
 
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        pass
+        return self.q1(obs, action), self.q2(obs, action)
 
     def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        pass
+        obs_feat = self.encoder(obs)
+        act_feat = self.action_encoder1(action)
+        return self.critic1(torch.cat([obs_feat, act_feat], dim=-1))
 
     def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        pass
-
+        obs_feat = self.encoder(obs)
+        act_feat = self.action_encoder2(action)
+        return self.critic2(torch.cat([obs_feat, act_feat], dim=-1))
 
 def policy_factory(name: str, obs_dim: int, action_dim: int, max_action: float, device) -> Tuple[BaseActor, BaseCritic]:
     if name == "mlp":
-        actor = MlpActor(obs_dim, action_dim, hidden_dim=256, n_layers=2, max_action=max_action)
-        critic = MlpCritic(obs_dim, action_dim, hidden_dim=256, n_layers=2)
+        actor = MlpActor(obs_dim, action_dim, hidden_dim=256, n_layers=2, max_action=max_action).to(device)
+        critic = MlpCritic(obs_dim, action_dim, hidden_dim=256, n_layers=2).to(device)
     elif name == "cnn":
-        actor = CnnActor(obs_dim, action_dim, hidden_dim=256, n_layers=2, max_action=max_action)
-        critic = CnnCritic(obs_dim, action_dim, hidden_dim=256, n_layers=2)
+        shared_encoder = CnnEncoder(obs_dim, hidden_dim=16).to(device)
+        actor = CnnActor(shared_encoder, action_dim, hidden_dim=16, n_layers=1, max_action=max_action).to(device)
+        critic = CnnCritic(shared_encoder, action_dim, hidden_dim=16, n_layers=1).to(device)
     else:
         raise ValueError(f"Unknown policy name: {name}")
 
-    return actor.to(device), critic.to(device)
+    return actor, critic
 
 
 if __name__ == "__main__":
