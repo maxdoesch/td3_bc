@@ -1,6 +1,6 @@
 import os
 import numpy as np
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import imageio.v3 as imageio
 from gymnasium import Env, spaces
@@ -115,21 +115,23 @@ class DMCWrapper(Env):
     def __getattr__(self, name):
         return getattr(self._env, name)
 
-    def _get_obs(self, time_step):
+    def _get_obs_info(self, time_step) -> Tuple:
+        pixels = self.render(height=self._height, width=self._width, camera_id=self._camera_id)
+        pixels = pixels.transpose(2, 0, 1) if self._channels_first else pixels
+        state = _flatten_obs(time_step.observation)
+
         if self._obs_type == "pixels":
-            obs = self.render(height=self._height, width=self._width, camera_id=self._camera_id)
-            if self._channels_first:
-                obs = obs.transpose(2, 0, 1).copy()
+            obs = pixels
+            info = {'state': state}
         elif self._obs_type == "state":
-            obs = _flatten_obs(time_step.observation)
+            obs = state
+            info = {'pixels': pixels}
         elif self._obs_type == "both":
             obs = {
-                "pixels": self.render(height=self._height, width=self._width, camera_id=self._camera_id),
-                "state": _flatten_obs(time_step.observation),
+                "pixels": pixels,
+                "state": state,
             }
-            if self._channels_first:
-                obs["pixels"] = obs["pixels"].transpose(2, 0, 1).copy()
-        return obs
+        return obs, info
 
     def _convert_action(self, action):
         action = action.astype(np.float64)
@@ -178,9 +180,9 @@ class DMCWrapper(Env):
             terminated = time_step.last()
             if terminated:
                 break
-        obs = self._get_obs(time_step)
-        self.current_state = _flatten_obs(time_step.observation)
+        obs, info = self._get_obs_info(time_step)
         extra["discount"] = time_step.discount
+        extra.update(info)
 
         truncated = False  # dm_control has no time limits by default
         return obs, reward, terminated, truncated, extra
@@ -190,9 +192,10 @@ class DMCWrapper(Env):
             self.seed(seed)
         time_step = self._env.reset()
         self.current_state = _flatten_obs(time_step.observation)
-        obs = self._get_obs(time_step)
-        info = {"internal_state": self._env.physics.get_state().copy(), "discount": time_step.discount}
-        return obs, info
+        obs, info = self._get_obs_info(time_step)
+        extra = {"internal_state": self._env.physics.get_state().copy(), "discount": time_step.discount}
+        extra.update(info)
+        return obs, extra
 
     def render(self, mode="rgb_array", height=None, width=None, camera_id=0):
         assert mode == "rgb_array", "only support rgb_array mode, given %s" % mode
