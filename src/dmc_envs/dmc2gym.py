@@ -116,7 +116,7 @@ class DMCWrapper(Env):
         return getattr(self._env, name)
 
     def _get_obs_info(self, time_step) -> Tuple:
-        pixels = self.render(height=self._height, width=self._width, camera_id=self._camera_id)
+        pixels = self.render(height=self._height, width=self._width, camera_id=self._camera_id).copy()
         pixels = pixels.transpose(2, 0, 1) if self._channels_first else pixels
         state = _flatten_obs(time_step.observation)
 
