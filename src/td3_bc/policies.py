@@ -274,14 +274,7 @@ class FTDCritic(nn.Module):
         return q1, q2
 
 
-def policy_factory(
-    name: str,
-    obs_dim: int | tuple[int, int, int],
-    action_dim: int,
-    max_action: float,
-    device: str,
-    config: SharedFTDLayersConfig | None = None,
-) -> Tuple[BaseActor, BaseCritic]:
+def policy_factory(name: str, obs_dim: int | tuple[int, int, int], action_dim: int, max_action: float, device: str, config: SharedFTDLayersConfig | None = None) -> Tuple[BaseActor, BaseCritic]:
     if name == "mlp":
         actor = MlpActor(obs_dim, action_dim, hidden_dim=256, n_layers=2, max_action=max_action).to(device)
         critic = MlpCritic(obs_dim, action_dim, hidden_dim=256, n_layers=2).to(device)
