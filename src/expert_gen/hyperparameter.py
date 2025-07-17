@@ -1,79 +1,70 @@
 import flax.nnx as nn
 
 HYPERPARAMETERS = {
-        'dmc_cheetah_run_1-v1': {
-            'normalize': True,
-            'n_envs': 1,
-            'policy': 'MlpPolicy',
-            'n_timesteps': 1_000_000,
-            'batch_size': 64,
-            'n_steps': 512,
-            'gamma': 0.98,
-            'learning_rate': 2.0633e-05,
-            'ent_coef': 0.000401762,
-            'clip_range': 0.1,
-            'n_epochs': 20,
-            'gae_lambda': 0.92,
-            'max_grad_norm': 0.8,
-            'vf_coef': 0.58096,
-            'policy_kwargs': {
-                'log_std_init': -2,
-                'ortho_init': False,
-                'activation_fn': nn.relu,
-                'net_arch': {
-                    'pi': [256, 256],
-                    'vf': [256, 256]
-                }
-            }
+    "dmc_cheetah_run_1-v1": {
+        "normalize": True,
+        "n_envs": 1,
+        "policy": "MlpPolicy",
+        "n_timesteps": 1_000_000,
+        "batch_size": 64,
+        "n_steps": 512,
+        "gamma": 0.98,
+        "learning_rate": 2.0633e-05,
+        "ent_coef": 0.000401762,
+        "clip_range": 0.1,
+        "n_epochs": 20,
+        "gae_lambda": 0.92,
+        "max_grad_norm": 0.8,
+        "vf_coef": 0.58096,
+        "policy_kwargs": {
+            "log_std_init": -2,
+            "ortho_init": False,
+            "activation_fn": nn.relu,
+            "net_arch": {"pi": [256, 256], "vf": [256, 256]},
         },
-        'dmc_hopper_run_1-v1': {
-            'normalize': True,
-            'n_envs': 1,
-            'policy': 'MlpPolicy',
-            'n_timesteps': 1_000_000,
-            'batch_size': 32,
-            'n_steps': 512,
-            'gamma': 0.999,
-            'learning_rate': 9.80828e-05,
-            'ent_coef': 0.00229519,
-            'clip_range': 0.2,
-            'n_epochs': 5,
-            'gae_lambda': 0.99,
-            'max_grad_norm': 0.7,
-            'vf_coef': 0.835671,
-            'policy_kwargs': {
-                'log_std_init': -2,
-                'ortho_init': False,
-                'activation_fn': nn.relu,
-                'net_arch': {
-                    'pi': [256, 256],
-                    'vf': [256, 256]
-                }
-            }
+    },
+    "dmc_hopper_run_1-v1": {
+        "normalize": True,
+        "n_envs": 1,
+        "policy": "MlpPolicy",
+        "n_timesteps": 1_000_000,
+        "batch_size": 32,
+        "n_steps": 512,
+        "gamma": 0.999,
+        "learning_rate": 9.80828e-05,
+        "ent_coef": 0.00229519,
+        "clip_range": 0.2,
+        "n_epochs": 5,
+        "gae_lambda": 0.99,
+        "max_grad_norm": 0.7,
+        "vf_coef": 0.835671,
+        "policy_kwargs": {
+            "log_std_init": -2,
+            "ortho_init": False,
+            "activation_fn": nn.relu,
+            "net_arch": {"pi": [256, 256], "vf": [256, 256]},
         },
-        'dmc_humanoid_run_1-v1': {
-            'normalize': True,
-            'n_envs': 1,
-            'policy': 'MlpPolicy',
-            'n_timesteps': 10_000_000,
-            'batch_size': 256,
-            'n_steps': 512,
-            'gamma': 0.95,
-            'learning_rate': 3.56987e-05,
-            'ent_coef': 0.00238306,
-            'clip_range': 0.3,
-            'n_epochs': 5,
-            'gae_lambda': 0.9,
-            'max_grad_norm': 2,
-            'vf_coef': 0.431892,
-            'policy_kwargs': {
-                'log_std_init': -2,
-                'ortho_init': False,
-                'activation_fn': nn.relu,
-                'net_arch': {
-                    'pi': [256, 256],
-                    'vf': [256, 256]
-                }
-            }
-        }
-    }
+    },
+    "dmc_humanoid_run_1-v1": {
+        "normalize": True,
+        "n_envs": 1,
+        "policy": "MlpPolicy",
+        "n_timesteps": 10_000_000,
+        "batch_size": 256,
+        "n_steps": 512,
+        "gamma": 0.95,
+        "learning_rate": 3.56987e-05,
+        "ent_coef": 0.00238306,
+        "clip_range": 0.3,
+        "n_epochs": 5,
+        "gae_lambda": 0.9,
+        "max_grad_norm": 2,
+        "vf_coef": 0.431892,
+        "policy_kwargs": {
+            "log_std_init": -2,
+            "ortho_init": False,
+            "activation_fn": nn.relu,
+            "net_arch": {"pi": [256, 256], "vf": [256, 256]},
+        },
+    },
+}

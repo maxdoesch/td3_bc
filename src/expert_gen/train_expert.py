@@ -5,13 +5,11 @@ import wandb
 
 from sbx import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize
-from stable_baselines3.common.callbacks import (
-    CallbackList, EvalCallback, CheckpointCallback, BaseCallback
-)
+from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback, BaseCallback
 from wandb.integration.sb3 import WandbCallback
 
 from expert_gen.hyperparameter import HYPERPARAMETERS
-import dmc_envs
+import dmc_envs  # noqa: F401
 
 
 class VecNormalizeCallback(BaseCallback):
@@ -36,18 +34,14 @@ def make_env(env_id):
 
 def main():
     parser = argparse.ArgumentParser(description="Train an expert agent using PPO.")
-    parser.add_argument("--env-id", type=str, default="dmc_cheetah_run_1-v1",
-                        help="Environment ID to train on.")
-    parser.add_argument("--eval-envs", type=int, default=1,
-                        help="Number of evaluation environments.")
-    parser.add_argument("--eval-freq", type=int, default=10_000,
-                        help="Evaluation frequency.")
-    parser.add_argument("--n-eval-episodes", type=int, default=5,
-                        help="Episodes per evaluation.")
-    parser.add_argument("--checkpoint-freq", type=int, default=100_000,
-                        help="Checkpoint frequency.")
-    parser.add_argument("--output-dir", type=str, default="checkpoints/expert_models",
-                        help="Output directory for logs and models.")
+    parser.add_argument("--env-id", type=str, default="dmc_cheetah_run_1-v1", help="Environment ID to train on.")
+    parser.add_argument("--eval-envs", type=int, default=1, help="Number of evaluation environments.")
+    parser.add_argument("--eval-freq", type=int, default=10_000, help="Evaluation frequency.")
+    parser.add_argument("--n-eval-episodes", type=int, default=5, help="Episodes per evaluation.")
+    parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency.")
+    parser.add_argument(
+        "--output-dir", type=str, default="checkpoints/expert_models", help="Output directory for logs and models."
+    )
     args = parser.parse_args()
 
     hparams = HYPERPARAMETERS[args.env_id]
@@ -60,7 +54,7 @@ def main():
         monitor_gym=True,
     )
 
-    run_path = os.path.join(args.output_dir, f'run-{args.env_id}-{run.id}')
+    run_path = os.path.join(args.output_dir, f"run-{args.env_id}-{run.id}")
     vecnorm_path = os.path.join(run_path, "vecnormalize_checkpoints")
     os.makedirs(vecnorm_path, exist_ok=True)
 
@@ -80,27 +74,23 @@ def main():
         eval_env.obs_rms = train_env.obs_rms
 
     # Callbacks
-    callbacks = CallbackList([
-        EvalCallback(
-            eval_env,
-            best_model_save_path=os.path.join(run_path, "best"),
-            log_path=os.path.join(run_path, "eval_logs"),
-            eval_freq=args.eval_freq,
-            n_eval_episodes=args.n_eval_episodes,
-            deterministic=True,
-        ),
-        CheckpointCallback(
-            save_freq=args.checkpoint_freq,
-            save_path=os.path.join(run_path, "checkpoints"),
-            name_prefix="ppo_model"
-        ),
-        WandbCallback(gradient_save_freq=100),
-        VecNormalizeCallback(
-            vecnormalize_env=train_env,
-            save_path=vecnorm_path,
-            save_freq=args.checkpoint_freq
-        ),
-    ])
+    callbacks = CallbackList(
+        [
+            EvalCallback(
+                eval_env,
+                best_model_save_path=os.path.join(run_path, "best"),
+                log_path=os.path.join(run_path, "eval_logs"),
+                eval_freq=args.eval_freq,
+                n_eval_episodes=args.n_eval_episodes,
+                deterministic=True,
+            ),
+            CheckpointCallback(
+                save_freq=args.checkpoint_freq, save_path=os.path.join(run_path, "checkpoints"), name_prefix="ppo_model"
+            ),
+            WandbCallback(gradient_save_freq=100),
+            VecNormalizeCallback(vecnormalize_env=train_env, save_path=vecnorm_path, save_freq=args.checkpoint_freq),
+        ]
+    )
 
     # Model training
     model = PPO(
