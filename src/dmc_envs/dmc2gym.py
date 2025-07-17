@@ -122,10 +122,10 @@ class DMCWrapper(Env):
 
         if self._obs_type == "pixels":
             obs = pixels
-            info = {'state': state}
+            info = {"state": state}
         elif self._obs_type == "state":
             obs = state
-            info = {'pixels': pixels}
+            info = {"pixels": pixels}
         elif self._obs_type == "both":
             obs = {
                 "pixels": pixels,
