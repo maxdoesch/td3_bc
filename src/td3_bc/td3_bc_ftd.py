@@ -14,10 +14,10 @@ from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
 
 
 @dataclass
-class TD3BC_FTD_Base_Config(TD3BC_Base_Config):
+class TD3BC_FTD_Config(TD3BC_Base_Config):
     num_regions: int = 9  # Maximum number of segmented regions
     num_channels: int = 3  # Number of input channels
-    num_stack: int = 3  # Number of frames stacked together as a single observation
+    num_stack: int = 1  # Number of frames stacked together as a single observation
     num_selector_layers: int = 5  # Number of convolutional layers in the attention selector
     num_filters: int = 32  # Number of filters in the convolutional layers
     embed_dim: int = 128  # Dimension of the embedding space for attention
@@ -34,7 +34,7 @@ class TD3BC_FTD_Base_Config(TD3BC_Base_Config):
     predictors_lr: float = 1e-4  # Learning rate for the auxiliary predictors
 
     # Update frequencies:
-    actor_update_freq: int = 2  # Frequency of actor updates
+    policy_freq: int = 2  # Frequency of actor updates
     predictors_update_freq: int = 1  # Frequency of auxiliary predictors updates
     predictors_update_slow_freq: int = 50_000  # Frequency of slow updates for auxiliary predictors
     predictors_warmup_steps: int = 10_000  # Number of warmup steps before updating auxiliary predictors
@@ -54,13 +54,13 @@ class TD3BC_FTD_Base_Config(TD3BC_Base_Config):
         )
 
 
-class TD3BC_FTD_Base(TD3BC_Base):
+class TD3BC_FTD(TD3BC_Base):
     def __init__(
         self,
         obs_shape: tuple[int, int, int],
         action_dim: int,
         max_action: float,
-        cfg: TD3BC_FTD_Base_Config = TD3BC_FTD_Base_Config(),
+        cfg: TD3BC_FTD_Config = TD3BC_FTD_Config(),
         device: str | None = None,
     ):
         if device is None:
@@ -83,7 +83,7 @@ class TD3BC_FTD_Base(TD3BC_Base):
         self.noise_clip = cfg.noise_clip * self.max_action
         self.alpha = cfg.alpha
 
-        self.actor_update_freq = cfg.actor_update_freq
+        self.policy_freq = cfg.policy_freq
         self.predictors_update_freq = cfg.predictors_update_freq
         self.predictors_update_slow_freq = cfg.predictors_update_slow_freq
         self.predictors_warmup_steps = cfg.predictors_warmup_steps
@@ -237,7 +237,7 @@ class TD3BC_FTD_Base(TD3BC_Base):
         metrics["train/avg_q2"] = avg_q2
 
         # Update actor
-        if self.total_it % self.actor_update_freq == 0:
+        if self.total_it % self.policy_freq == 0:
             actions_taken, actor_loss, bc_loss, _ = self.update_actor(batch["obs"], batch["action"])
 
             metrics["train/actor_loss"] = actor_loss

@@ -268,10 +268,18 @@ class FTDCritic(nn.Module):
 
         self.critic = MlpCritic(self.encoder.out_dim, action_dim, hidden_dim=256, n_layers=2)
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         proj = self.encoder(obs)
-        q1, q2 = self.critic(proj)
+        q1, q2 = self.critic(proj, action)
         return q1, q2
+    
+    def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        proj = self.encoder(obs)
+        return self.critic.q1(proj, action)
+    
+    def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        proj = self.encoder(obs)
+        return self.critic.q2(proj, action)
 
 
 def policy_factory(

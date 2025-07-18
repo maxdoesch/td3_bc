@@ -18,13 +18,20 @@ import wandb
 
 from td3_bc.buffer import ReplayBuffer
 import td3_bc.td3_bc as td3_bc
+import td3_bc.td3_bc_ftd as td3_bc_ftd
 from td3_bc.evaluator import Evaluator
+from td3_bc.factory import get_td3_bc_agent
 
 
 @dataclass
 class ModeConfig(draccus.ChoiceRegistry):
     name: str
-    td3_config: td3_bc.TD3BC_Base_Config
+    td3_config: Union[
+        td3_bc.TD3BC_Config,
+        td3_bc.TD3BC_Refine_Config,
+        td3_bc.TD3BC_Online_Config,
+        td3_bc_ftd.TD3BC_FTD_Config,
+    ]
 
 
 @ModeConfig.register_subclass("pretrain")
@@ -50,6 +57,11 @@ class OnlineConfig(ModeConfig):
     warmup_steps: int = 5000
     expl_noise: float = 0.1
 
+@ModeConfig.register_subclass("pretrain_ftd")
+@dataclass
+class PretrainFTDConfig(ModeConfig):
+    name: str = "pretrain_ftd"
+    td3_config: td3_bc_ftd.TD3BC_FTD_Config = td3_bc_ftd.TD3BC_FTD_Config()
 
 @dataclass
 class TrainerConfig:
@@ -208,7 +220,7 @@ class Trainer(ABC):
         self.envs.reset(seed=seed)
 
     def _load_agent(self, pretrain_dir: str, pretrain_checkpoint: int, seed: int):
-        self.agent = td3_bc.get_td3_bc_agent(
+        self.agent = get_td3_bc_agent(
             obs_shape=self.obs_shape,
             action_dim=self.action_dim,
             max_action=self.max_action,
@@ -444,7 +456,7 @@ class OnlineTrainer(Trainer):
 
 
 def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None) -> Trainer:
-    trainer_map = {"pretrain": OfflineTrainer, "refine": OfflineTrainer, "online": OnlineTrainer}
+    trainer_map = {"pretrain": OfflineTrainer, "refine": OfflineTrainer, "online": OnlineTrainer, 'pretrain_ftd': OfflineTrainer}
     if cfg.train_mode.name not in trainer_map:
         raise ValueError(f"Unknown training mode: {cfg.train_mode.name}")
     return (

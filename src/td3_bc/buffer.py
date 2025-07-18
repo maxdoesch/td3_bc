@@ -159,7 +159,7 @@ class ReplayBuffer:
         self.not_done = self.not_done[: self.size]
 
     def convert_minari(self, dataset: minari.MinariDataset):
-        # assert dataset.observation_space.shape == self.obs_shape, "Observation dimension mismatch."
+        #assert dataset.observation_space.shape == self.obs_shape or dataset.observation_space.shape[::-1] == self.obs_shape, "Observation dimension mismatch."
 
         assert dataset.action_space.shape[0] == self.action_dim, "Action dimension mismatch."
 
