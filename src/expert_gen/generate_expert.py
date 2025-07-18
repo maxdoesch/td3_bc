@@ -10,6 +10,8 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from minari import DataCollector, delete_dataset, list_local_datasets
 
 import dmc_envs  # noqa: F401
+from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig
+import td3_bc.utils as utils
 
 # Metadata
 CODE_PERMALINK = "https://github.com/maxdoesch/td3_bc"
@@ -18,6 +20,20 @@ AUTHOR_EMAIL = "doesch.maximilian@gmail.com"
 
 # Skill level thresholds
 SKILL_LEVEL = {"expert": 1.0, "medium": 0.4, "simple": 0.2}
+
+
+class CombineStackedFrames(gym.ObservationWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+
+        C, H, W = env.observation_space.shape
+
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(H, W * (C // 3), 3), dtype=np.uint8)
+
+    def observation(self, observation):
+        observation = utils.combine_stacked_frames(observation)
+
+        return observation
 
 
 class GetStateFromInfo(gym.Wrapper):
@@ -38,7 +54,9 @@ class GetStateFromInfo(gym.Wrapper):
         return info["state"], reward, terminated, truncated, info
 
 
-def generate_expert_dataset(env_id: str, total_steps: int, expert_path: str, skill_level: str, save_to_gif: bool):
+def generate_expert_dataset(
+    env_id: str, gen_segmentation: bool, total_steps: int, expert_path: str, skill_level: str, save_to_gif: bool
+):
     # Determine checkpoint
     checkpoints_dir = os.path.join(expert_path, "checkpoints")
     checkpoints = os.listdir(checkpoints_dir)
@@ -50,12 +68,16 @@ def generate_expert_dataset(env_id: str, total_steps: int, expert_path: str, ski
     vecnorm_path = os.path.join(expert_path, "vecnormalize_checkpoints", f"vecnormalize_step_{checkpoint}.pkl")
 
     # Build env
-    env = gym.make(env_id, obs_type="pixels", height=96, width=96)
+    env = gym.make(env_id, obs_type="pixels", height=96, width=96, channels_first=True if gen_segmentation else False)
 
-    env_dc = DataCollector(
-        env,
-        record_infos=False,
-    )
+    if gen_segmentation:
+        env_config = FTDObservationWrapperConfig(
+            add_original_frame=False,
+        )
+        env = FTDObservationWrapper(env, config=env_config)
+        env = CombineStackedFrames(env)
+
+    env_dc = DataCollector(env, record_infos=False, data_format="arrow")
 
     env = GetStateFromInfo(env_dc)
 
@@ -88,6 +110,7 @@ def generate_expert_dataset(env_id: str, total_steps: int, expert_path: str, ski
     for _ in range(total_steps):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
+        print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")
 
         cumulative_reward += reward
         if save_to_gif:
@@ -100,17 +123,22 @@ def generate_expert_dataset(env_id: str, total_steps: int, expert_path: str, ski
 
             if save_to_gif and observations:
                 gif_path = os.path.join(gif_dir, f"episode_{skill_level}_{episode_count}.gif")
-                imageio.mimsave(gif_path, observations, fps=30)
+                imageio.mimsave(gif_path, observations, fps=20)
                 observations = []
 
             episode_count += 1
+
+    if save_to_gif and observations:
+        gif_path = os.path.join(gif_dir, f"episode_{skill_level}_{episode_count}.gif")
+        imageio.mimsave(gif_path, observations, fps=20)
+        observations = []
 
     # Final stats and dataset save
     print(f"[{skill_level.upper()}] Episodes: {episode_count}, Avg Reward: {np.mean(cumulative_rewards):.2f}")
 
     env_dc.create_dataset(
         dataset_id=dataset_id,
-        eval_env=gym.make(env_id, obs_type="pixels"),
+        eval_env=env_dc,
         algorithm_name="ppo",
         author=AUTHOR,
         author_email=AUTHOR_EMAIL,
@@ -126,6 +154,7 @@ def main():
     parser.add_argument("--env-id", type=str, default="dmc_distraction_cheetah_run_1-v1")
     parser.add_argument("--total-steps", type=int, default=1_000_000)
     parser.add_argument("--expert-path", type=str, default="checkpoints/expert_models")
+    parser.add_argument("--gen-segmentation", action="store_true", help="Generate segmentation masks in the dataset.")
     parser.add_argument("--save-to-gif", action="store_true")
     args = parser.parse_args()
 
@@ -133,6 +162,7 @@ def main():
         print(f"--- Generating dataset for skill level: {level} ---")
         generate_expert_dataset(
             env_id=args.env_id,
+            gen_segmentation=args.gen_segmentation,
             total_steps=args.total_steps,
             expert_path=args.expert_path,
             skill_level=level,

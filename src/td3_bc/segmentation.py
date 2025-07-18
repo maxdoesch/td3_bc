@@ -13,7 +13,7 @@ from mobilesamv2 import sam_model_registry, SamPredictor
 
 @dataclass
 class MobileSAMV2Config:
-    image_size: int = 320  # Size of the input image for segmentation
+    image_size: int = 96  # Size of the input image for segmentation
     confidence_threshold: float = 0.5  # Confidence threshold for object detection
     iou: float = 0.3  # Intersection over Union threshold for filtering detections
     remove_fully_contained: bool = False  # Whether to remove fully contained masks from segmentation

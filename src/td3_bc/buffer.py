@@ -6,6 +6,8 @@ import minari
 import logging
 from typing import Dict, Tuple, Optional, Union
 
+import td3_bc.utils as utils
+
 
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3):
     return (array - mean) / (std + eps)
@@ -157,14 +159,16 @@ class ReplayBuffer:
         self.not_done = self.not_done[: self.size]
 
     def convert_minari(self, dataset: minari.MinariDataset):
-        assert dataset.observation_space.shape == self.obs_shape, "Observation dimension mismatch."
+        # assert dataset.observation_space.shape == self.obs_shape, "Observation dimension mismatch."
+
         assert dataset.action_space.shape[0] == self.action_dim, "Action dimension mismatch."
 
         for episode in dataset.iterate_episodes():
+            observations = utils.uncombine_stacked_frames(episode.observations)
             transition = {
-                "obs": episode.observations[:-1],
+                "obs": observations[:-1],
                 "action": episode.actions,
-                "next_obs": episode.observations[1:],
+                "next_obs": observations[1:],
                 "reward": episode.rewards,
                 "done": episode.terminations,
             }

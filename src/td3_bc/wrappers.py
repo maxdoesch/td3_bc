@@ -109,7 +109,8 @@ class FTDObservationWrapper(gym.ObservationWrapper):
             all_segments = torch.cat([masked_segments, full_frame], dim=0)  # (R+1, C, H, W)
         else:
             all_segments = masked_segments
-        all_segments = all_segments.view(self.num_regions_with_original * self.config.num_channels, self.H, self.W)
+
+        all_segments = all_segments.reshape(self.num_regions_with_original * self.config.num_channels, self.H, self.W)
 
         return all_segments.cpu().numpy().astype(np.uint8)
 
