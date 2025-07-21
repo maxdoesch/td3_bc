@@ -31,6 +31,8 @@ class TD3BC_FTD_Config(TD3BC_Base_Config):
     predictors_update_slow_freq: int = 50_000  # Frequency of slow updates for auxiliary predictors
     predictors_warmup_steps: int = 10_000  # Number of warmup steps before updating auxiliary predictors
 
+    log_img_freq: int = 500  # Frequency of logging images to wandb
+
 
 class TD3BC_FTD(TD3BC_Base):
     def __init__(
@@ -69,11 +71,11 @@ class TD3BC_FTD(TD3BC_Base):
         self.predictors_update_slow_freq = cfg.predictors_update_slow_freq
         self.predictors_warmup_steps = cfg.predictors_warmup_steps
 
+        self.log_img_freq = cfg.log_img_freq
+
         # === Layers ===
 
-        self.actor, self.critic = policies.get_policy(
-            obs_shape, action_dim, max_action, self.device, cfg.policy_config
-        )
+        self.actor, self.critic = policies.get_policy(obs_shape, action_dim, max_action, self.device, cfg.policy_config)
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
 
         self.complete_selector = self.critic.shared_layers.selector_layers.to(self.device)
@@ -240,10 +242,9 @@ class TD3BC_FTD(TD3BC_Base):
                 )
                 metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
 
-        if self.total_it % 100 == 0:
-            metrics['train/raw_images'] = wandb.Image(batch['obs'][0][:3])
-            metrics['train/ftd_images'] = wandb.Image(self.select_image(batch["obs"][0])[1])
-
+        if self.total_it % self.log_img_freq == 0:
+            metrics["train/raw_images"] = wandb.Image(batch["obs"][-1][:3])
+            metrics["train/ftd_images"] = wandb.Image(self.select_image(batch["obs"][0])[1])
 
         metrics["train/time"] = time.time() - start_time
 

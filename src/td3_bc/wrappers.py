@@ -34,6 +34,7 @@ class FTDObservationWrapper(gym.ObservationWrapper):
 
         # Load MobileSAMv2
         self.mobilesamv2 = MobileSAMV2(config.sam_config)
+        # self.mobilesamv2.enable_logging(False)
 
         # Set new observation space
         old_shape = env.observation_space.shape
@@ -96,6 +97,8 @@ class FTDObservationWrapper(gym.ObservationWrapper):
     def observation(self, observation):
         # Get Masks
         pred = self.__get_predictions(observation)
+        if pred is None:
+            return np.zeros((self.config.num_channels * self.num_regions_with_original, self.H, self.W), dtype=np.uint)
         sorted_indices = self.__sort_predictions(pred)
         masks = pred["masks"][sorted_indices]
         masks = self.__pad_or_trim_masks(masks)

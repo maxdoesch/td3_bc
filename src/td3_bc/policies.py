@@ -9,11 +9,13 @@ import torch.nn as nn
 from td3_bc.ftd.image_attention import ImageAttentionSelectorLayers
 import td3_bc.ftd.modules as m
 
+
 @dataclass
 class PolicyConfig(draccus.ChoiceRegistry):
     pass
 
-@PolicyConfig.register_subclass('mlp')
+
+@PolicyConfig.register_subclass("mlp")
 @dataclass
 class MlpPolicyConfig(PolicyConfig):
     critic_hidden_dim: int = 256
@@ -22,7 +24,8 @@ class MlpPolicyConfig(PolicyConfig):
     actor_hidden_dim: int = 256
     actor_n_layers: int = 2
 
-@PolicyConfig.register_subclass('cnn')
+
+@PolicyConfig.register_subclass("cnn")
 @dataclass
 class CnnPolicyConfig(PolicyConfig):
     encoder_hidden_dim: int = 16
@@ -33,7 +36,8 @@ class CnnPolicyConfig(PolicyConfig):
     actor_hidden_dim: int = 16
     actor_n_layers: int = 1
 
-@PolicyConfig.register_subclass('ftd')
+
+@PolicyConfig.register_subclass("ftd")
 @dataclass
 class FtdPolicyConfig(PolicyConfig):
     num_regions: int = 10  # Maximum number of segmented regions
@@ -45,13 +49,14 @@ class FtdPolicyConfig(PolicyConfig):
     num_attention_heads: int = 4  # Number of attention heads
     num_shared_layers: int = 11  # Number of shared convolutional layers
     num_head_layers: int = 0  # Number of hidden layers in the head CNN
-    projection_dim: int = 100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
+    projection_dim: int = (
+        100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
+    )
+
 
 class BaseActor(nn.Module, ABC):
     @abstractmethod
-    def __init__(
-        self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float
-    ):
+    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float):
         super().__init__()
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
@@ -169,7 +174,15 @@ class CnnEncoder(nn.Module):
 
 
 class CnnActor(BaseActor):
-    def __init__(self, encoder: CnnEncoder, obs_shape: Tuple[int, int, int], action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
+    def __init__(
+        self,
+        encoder: CnnEncoder,
+        obs_shape: Tuple[int, int, int],
+        action_dim: int,
+        hidden_dim: int,
+        n_layers: int,
+        max_action: float,
+    ):
         super().__init__(obs_shape, action_dim, hidden_dim, n_layers, max_action)
         self.encoder = encoder
 
@@ -188,7 +201,9 @@ class CnnActor(BaseActor):
 
 
 class CnnCritic(BaseCritic):
-    def __init__(self, encoder: CnnEncoder, obs_shape: Tuple[int, int, int], action_dim: int, hidden_dim: int, n_layers: int):
+    def __init__(
+        self, encoder: CnnEncoder, obs_shape: Tuple[int, int, int], action_dim: int, hidden_dim: int, n_layers: int
+    ):
         super().__init__(obs_shape, action_dim, hidden_dim, n_layers)
         self.encoder = encoder
 
@@ -225,6 +240,7 @@ class CnnCritic(BaseCritic):
         act_feat = self.action_encoder2(action)
         return self.critic2(torch.cat([obs_feat, act_feat], dim=-1))
 
+
 class SharedFTDLayers(nn.Module):
     def __init__(self, obs_shape: tuple[int, int, int], cfg: FtdPolicyConfig):
         super().__init__()
@@ -260,8 +276,9 @@ class SharedFTDLayers(nn.Module):
 
 
 class FTDActor(BaseActor):
-    def __init__(self, shared_layers: SharedFTDLayers, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float):
-
+    def __init__(
+        self, shared_layers: SharedFTDLayers, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float
+    ):
         super().__init__(obs_shape, action_dim, max_action)
         self.shared_layers = shared_layers
 
@@ -292,15 +309,16 @@ class FTDCritic(BaseCritic):
         proj = self.encoder(obs)
         q1, q2 = self.critic(proj, action)
         return q1, q2
-    
+
     def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         proj = self.encoder(obs)
         return self.critic.q1(proj, action)
-    
+
     def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         proj = self.encoder(obs)
         return self.critic.q2(proj, action)
-    
+
+
 def get_policy(
     obs_shape: int | tuple[int, int, int],
     action_dim: int,
@@ -313,12 +331,25 @@ def get_policy(
     ],
 ) -> Tuple:
     if type(cfg) is MlpPolicyConfig:
-        actor = MlpActor(obs_shape, action_dim, hidden_dim=cfg.actor_hidden_dim, n_layers=cfg.actor_n_layers, max_action=max_action).to(device)
-        critic = MlpCritic(obs_shape, action_dim, hidden_dim=cfg.critic_hidden_dim, n_layers=cfg.critic_n_layers).to(device)
+        actor = MlpActor(
+            obs_shape, action_dim, hidden_dim=cfg.actor_hidden_dim, n_layers=cfg.actor_n_layers, max_action=max_action
+        ).to(device)
+        critic = MlpCritic(obs_shape, action_dim, hidden_dim=cfg.critic_hidden_dim, n_layers=cfg.critic_n_layers).to(
+            device
+        )
     elif type(cfg) is CnnPolicyConfig:
         shared_encoder = CnnEncoder(obs_shape, hidden_dim=cfg.encoder_hidden_dim).to(device)
-        actor = CnnActor(shared_encoder, obs_shape, action_dim, hidden_dim=cfg.actor_hidden_dim, n_layers=cfg.actor_n_layers, max_action=max_action).to(device)
-        critic = CnnCritic(shared_encoder, obs_shape, action_dim, hidden_dim=cfg.critic_hidden_dim, n_layers=cfg.critic_n_layers).to(device)
+        actor = CnnActor(
+            shared_encoder,
+            obs_shape,
+            action_dim,
+            hidden_dim=cfg.actor_hidden_dim,
+            n_layers=cfg.actor_n_layers,
+            max_action=max_action,
+        ).to(device)
+        critic = CnnCritic(
+            shared_encoder, obs_shape, action_dim, hidden_dim=cfg.critic_hidden_dim, n_layers=cfg.critic_n_layers
+        ).to(device)
     elif type(cfg) is FtdPolicyConfig:
         shared_layers = SharedFTDLayers(obs_shape, cfg)
         actor = FTDActor(shared_layers, obs_shape, action_dim, max_action).to(device)
@@ -327,7 +358,6 @@ def get_policy(
         raise ValueError(f"Unknown Policy Configuration type: {type(cfg)}")
 
     return actor, critic
-
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 train_steps: 1000000
 eval_freq: 1000
-eval_episodes: 0
+eval_episodes: 1
 checkpoint_freq: 25000
-batch_size: 16
+batch_size: 8
 
 seeds: 42
 n_seeds: 5
@@ -10,9 +10,9 @@ n_seeds: 5
 wandb_project: td3-bc
 checkpoint_dir: ./checkpoints
 
-#experiment_name: <optional>
+experiment_name: dmc-distraction-overfitting-test
 
-dataset_path: dmc_distraction/dmc_distraction_cheetah_run_1-v1/medium-v0
+dataset_path: dmc-distraction-overfitting-v0
 
 env_name: dmc_distraction_cheetah_run_1-v1
 num_envs: 1
@@ -42,3 +42,15 @@ train_mode:
       num_shared_layers: 11
       num_head_layers: 0
       projection_dim: 100
+
+    predictor_hidden_dim: 1024
+    reward_factor: 1.0
+    inverse_factor: 1.0
+    max_grad_norm: 5.0
+    predictors_lr: 1e-4
+
+    predictors_update_freq: 1
+    predictors_update_slow_freq: 50_000
+    predictors_warmup_steps: 10_000
+
+    log_img_freq: 100

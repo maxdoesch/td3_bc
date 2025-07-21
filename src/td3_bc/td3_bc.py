@@ -12,6 +12,7 @@ from torch.nn import functional
 
 import td3_bc.policies as policies
 
+
 @dataclass
 class TD3BC_Base_Config:
     policy_config: policies.PolicyConfig = policies.MlpPolicyConfig()
@@ -24,6 +25,7 @@ class TD3BC_Base_Config:
 
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
+
 
 @dataclass
 class TD3BC_Config(TD3BC_Base_Config):

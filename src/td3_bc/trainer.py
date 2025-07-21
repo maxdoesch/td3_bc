@@ -57,11 +57,13 @@ class OnlineConfig(ModeConfig):
     warmup_steps: int = 5000
     expl_noise: float = 0.1
 
+
 @ModeConfig.register_subclass("pretrain_ftd")
 @dataclass
 class PretrainFTDConfig(ModeConfig):
     name: str = "pretrain_ftd"
     td3_config: td3_bc_ftd.TD3BC_FTD_Config = td3_bc_ftd.TD3BC_FTD_Config()
+
 
 @dataclass
 class TrainerConfig:
@@ -376,7 +378,9 @@ class OfflineTrainer(Trainer):
         self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
         self._fill_replay_buffer()
 
-        obs_mean, obs_std = (np.array(0), np.array(255.0)) if self.obs_is_image else self.buffer.compute_dataset_statistics()
+        obs_mean, obs_std = (
+            (np.array(0), np.array(255.0)) if self.obs_is_image else self.buffer.compute_dataset_statistics()
+        )
 
         self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
 
@@ -458,7 +462,12 @@ class OnlineTrainer(Trainer):
 
 
 def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None) -> Trainer:
-    trainer_map = {"pretrain": OfflineTrainer, "refine": OfflineTrainer, "online": OnlineTrainer, 'pretrain_ftd': OfflineTrainer}
+    trainer_map = {
+        "pretrain": OfflineTrainer,
+        "refine": OfflineTrainer,
+        "online": OnlineTrainer,
+        "pretrain_ftd": OfflineTrainer,
+    }
     if cfg.train_mode.name not in trainer_map:
         raise ValueError(f"Unknown training mode: {cfg.train_mode.name}")
     return (

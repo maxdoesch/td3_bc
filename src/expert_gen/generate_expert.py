@@ -3,6 +3,7 @@ import argparse
 import imageio
 import numpy as np
 import gymnasium as gym
+import time
 
 from sbx import PPO
 from gymnasium.wrappers import NormalizeObservation
@@ -56,7 +57,14 @@ class GetStateFromInfo(gym.Wrapper):
 
 
 def generate_expert_dataset(
-    env_id: str, image_size: int, gen_segmentation: bool, total_steps: int, expert_path: str, skill_level: str, save_to_gif: bool
+    env_id: str,
+    dataset_id: str,
+    image_size: int,
+    gen_segmentation: bool,
+    total_steps: int,
+    expert_path: str,
+    skill_level: str,
+    save_to_gif: bool,
 ):
     # Determine checkpoint
     checkpoints_dir = os.path.join(expert_path, "checkpoints")
@@ -69,13 +77,17 @@ def generate_expert_dataset(
     vecnorm_path = os.path.join(expert_path, "vecnormalize_checkpoints", f"vecnormalize_step_{checkpoint}.pkl")
 
     # Build env
-    env = gym.make(env_id, obs_type="pixels", height=image_size, width=image_size, channels_first=True if gen_segmentation else False)
+    env = gym.make(
+        env_id,
+        obs_type="pixels",
+        height=image_size,
+        width=image_size,
+        channels_first=True if gen_segmentation else False,
+        video_dir='/td3_bc/misc/videos'
+    )
 
     if gen_segmentation:
-        sam_config = MobileSAMV2Config(
-            image_size=image_size,
-            confidence_threshold=0.3
-        )
+        sam_config = MobileSAMV2Config(image_size=image_size, confidence_threshold=0.5)
         env_config = FTDObservationWrapperConfig(
             sam_config=sam_config,
             add_original_frame=True,
@@ -98,9 +110,10 @@ def generate_expert_dataset(
     model = PPO.load(checkpoint_path)
 
     # Handle dataset naming and duplication
-    dataset_id = f"dmc_distraction/{env_id}/{skill_level}-v0"
+    if dataset_id is None:
+        dataset_id = f"dmc_distraction/{env_id}/{skill_level}-v0"
     if dataset_id in list_local_datasets():
-        delete_dataset(dataset_id)
+        raise ValueError(f"Dataset ID '{dataset_id}' already exists. Please choose a different ID.")
 
     # Rollout
     obs, _ = env.reset()
@@ -116,7 +129,7 @@ def generate_expert_dataset(
     for _ in range(total_steps):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
-        print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")
+        # print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")
 
         cumulative_reward += reward
         if save_to_gif:
@@ -158,6 +171,7 @@ def generate_expert_dataset(
 def main():
     parser = argparse.ArgumentParser(description="Generate a Minari expert dataset from a PPO-trained agent.")
     parser.add_argument("--env-id", type=str, default="dmc_distraction_cheetah_run_1-v1")
+    parser.add_argument("--dataset-id", type=str)
     parser.add_argument("--image-size", type=int, default=128)
     parser.add_argument("--total-steps", type=int, default=1_000_000)
     parser.add_argument("--expert-path", type=str, default="checkpoints/expert_models")
@@ -169,6 +183,7 @@ def main():
         print(f"--- Generating dataset for skill level: {level} ---")
         generate_expert_dataset(
             env_id=args.env_id,
+            dataset_id=args.dataset_id,
             image_size=args.image_size,
             gen_segmentation=args.gen_segmentation,
             total_steps=args.total_steps,
