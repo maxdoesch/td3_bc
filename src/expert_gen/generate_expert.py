@@ -10,6 +10,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from minari import DataCollector, delete_dataset, list_local_datasets
 
 import dmc_envs  # noqa: F401
+from td3_bc.segmentation import MobileSAMV2Config
 from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig
 import td3_bc.utils as utils
 
@@ -55,7 +56,7 @@ class GetStateFromInfo(gym.Wrapper):
 
 
 def generate_expert_dataset(
-    env_id: str, gen_segmentation: bool, total_steps: int, expert_path: str, skill_level: str, save_to_gif: bool
+    env_id: str, image_size: int, gen_segmentation: bool, total_steps: int, expert_path: str, skill_level: str, save_to_gif: bool
 ):
     # Determine checkpoint
     checkpoints_dir = os.path.join(expert_path, "checkpoints")
@@ -68,11 +69,16 @@ def generate_expert_dataset(
     vecnorm_path = os.path.join(expert_path, "vecnormalize_checkpoints", f"vecnormalize_step_{checkpoint}.pkl")
 
     # Build env
-    env = gym.make(env_id, obs_type="pixels", height=96, width=96, channels_first=True if gen_segmentation else False)
+    env = gym.make(env_id, obs_type="pixels", height=image_size, width=image_size, channels_first=True if gen_segmentation else False)
 
     if gen_segmentation:
+        sam_config = MobileSAMV2Config(
+            image_size=image_size,
+            confidence_threshold=0.3
+        )
         env_config = FTDObservationWrapperConfig(
-            add_original_frame=False,
+            sam_config=sam_config,
+            add_original_frame=True,
         )
         env = FTDObservationWrapper(env, config=env_config)
         env = CombineStackedFrames(env)
@@ -152,6 +158,7 @@ def generate_expert_dataset(
 def main():
     parser = argparse.ArgumentParser(description="Generate a Minari expert dataset from a PPO-trained agent.")
     parser.add_argument("--env-id", type=str, default="dmc_distraction_cheetah_run_1-v1")
+    parser.add_argument("--image-size", type=int, default=128)
     parser.add_argument("--total-steps", type=int, default=1_000_000)
     parser.add_argument("--expert-path", type=str, default="checkpoints/expert_models")
     parser.add_argument("--gen-segmentation", action="store_true", help="Generate segmentation masks in the dataset.")
@@ -162,6 +169,7 @@ def main():
         print(f"--- Generating dataset for skill level: {level} ---")
         generate_expert_dataset(
             env_id=args.env_id,
+            image_size=args.image_size,
             gen_segmentation=args.gen_segmentation,
             total_steps=args.total_steps,
             expert_path=args.expert_path,

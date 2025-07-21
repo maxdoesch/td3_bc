@@ -1,8 +1,10 @@
 import os
 import copy
 import time
+import wandb
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 import torch
@@ -15,18 +17,8 @@ from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
 
 @dataclass
 class TD3BC_FTD_Config(TD3BC_Base_Config):
-    num_regions: int = 9  # Maximum number of segmented regions
-    num_channels: int = 3  # Number of input channels
-    num_stack: int = 1  # Number of frames stacked together as a single observation
-    num_selector_layers: int = 5  # Number of convolutional layers in the attention selector
-    num_filters: int = 32  # Number of filters in the convolutional layers
-    embed_dim: int = 128  # Dimension of the embedding space for attention
-    num_attention_heads: int = 4  # Number of attention heads
-    num_shared_layers: int = 11  # Number of shared convolutional layers
-    num_head_layers: int = 0  # Number of hidden layers in the head CNN
-    projection_dim: int = (
-        100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
-    )
+    policy_config: policies.PolicyConfig = policies.FtdPolicyConfig()
+
     predictor_hidden_dim: int = 1024  # Hidden dimension for auxiliary predictors
     reward_factor: float = 1.0  # Scaling factor for the reward prediction loss
     inverse_factor: float = 1.0  # Scaling factor for the inverse dynamics prediction loss
@@ -39,20 +31,6 @@ class TD3BC_FTD_Config(TD3BC_Base_Config):
     predictors_update_slow_freq: int = 50_000  # Frequency of slow updates for auxiliary predictors
     predictors_warmup_steps: int = 10_000  # Number of warmup steps before updating auxiliary predictors
 
-    def get_shared_layers_config(self):
-        return policies.SharedFTDLayersConfig(
-            num_regions=self.num_regions,
-            num_channels=self.num_channels,
-            num_stack=self.num_stack,
-            num_selector_layers=self.num_selector_layers,
-            num_filters=self.num_filters,
-            embed_dim=self.embed_dim,
-            num_attention_heads=self.num_attention_heads,
-            num_shared_layers=self.num_shared_layers,
-            num_head_layers=self.num_head_layers,
-            projection_dim=self.projection_dim,
-        )
-
 
 class TD3BC_FTD(TD3BC_Base):
     def __init__(
@@ -60,9 +38,12 @@ class TD3BC_FTD(TD3BC_Base):
         obs_shape: tuple[int, int, int],
         action_dim: int,
         max_action: float,
-        cfg: TD3BC_FTD_Config = TD3BC_FTD_Config(),
+        cfg: Optional[TD3BC_FTD_Config] = None,
         device: str | None = None,
     ):
+        if cfg is None:
+            cfg = TD3BC_FTD_Config()
+
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
@@ -71,8 +52,8 @@ class TD3BC_FTD(TD3BC_Base):
 
         # === Configuration ===
 
-        self.num_regions = cfg.num_regions
-        self.num_channels = cfg.num_channels
+        self.num_regions = cfg.policy_config.num_regions
+        self.num_channels = cfg.policy_config.num_channels
         self.reward_factor = cfg.reward_factor
         self.inverse_factor = cfg.inverse_factor
         self.max_grad_norm = cfg.max_grad_norm
@@ -90,9 +71,8 @@ class TD3BC_FTD(TD3BC_Base):
 
         # === Layers ===
 
-        shared_layers_config = cfg.get_shared_layers_config()
-        self.actor, self.critic = policies.policy_factory(
-            "ftd", obs_shape, action_dim, max_action, self.device, shared_layers_config
+        self.actor, self.critic = policies.get_policy(
+            obs_shape, action_dim, max_action, self.device, cfg.policy_config
         )
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
 
@@ -259,6 +239,11 @@ class TD3BC_FTD(TD3BC_Base):
                     batch["obs"], batch["action"], batch["next_obs"]
                 )
                 metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
+
+        if self.total_it % 100 == 0:
+            metrics['train/raw_images'] = wandb.Image(batch['obs'][0][:3])
+            metrics['train/ftd_images'] = wandb.Image(self.select_image(batch["obs"][0])[1])
+
 
         metrics["train/time"] = time.time() - start_time
 

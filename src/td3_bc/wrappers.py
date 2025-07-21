@@ -24,7 +24,7 @@ class FTDObservationWrapperConfig:
 
 class FTDObservationWrapper(gym.ObservationWrapper):
     def __init__(self, env, config: FTDObservationWrapperConfig = FTDObservationWrapperConfig()):
-        gym.ObservationWrapper.__init__(self, env)
+        super().__init__(env)
 
         # Set up configurations
         assert isinstance(config, FTDObservationWrapperConfig), "config must be an instance of FTDWrapperConfig"

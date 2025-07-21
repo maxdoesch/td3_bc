@@ -148,7 +148,7 @@ class Evaluator:
 
         self.envs.reset()
 
-        return self.metric.compute()
+        return self.metric.compute() if self.n_eval_episodes > 0 else {}
 
 
 if __name__ == "__main__":

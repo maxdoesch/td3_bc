@@ -12,9 +12,10 @@ from torch.nn import functional
 
 import td3_bc.policies as policies
 
-
 @dataclass
 class TD3BC_Base_Config:
+    policy_config: policies.PolicyConfig = policies.MlpPolicyConfig()
+
     discount: float = 0.99
     tau: float = 0.005
     policy_noise: float = 0.2
@@ -23,7 +24,6 @@ class TD3BC_Base_Config:
 
     actor_lr: float = 3e-4
     critic_lr: float = 3e-4
-
 
 @dataclass
 class TD3BC_Config(TD3BC_Base_Config):
@@ -65,21 +65,25 @@ class TD3BC_Base(BaseAgent):
         cfg: Optional[TD3BC_Base_Config] = None,
         device: Optional[str] = None,
     ):
+        if cfg is None:
+            cfg = TD3BC_Base_Config()
+
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
 
         obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
 
-        policy_type = "mlp" if isinstance(obs_shape, int) or len(obs_shape) == 1 else "cnn"
-
-        self.actor, self.critic = policies.policy_factory(policy_type, obs_shape, action_dim, max_action, self.device)
+        self.actor, self.critic = policies.get_policy(
+            obs_shape=obs_shape,
+            action_dim=action_dim,
+            max_action=max_action,
+            device=self.device,
+            cfg=cfg.policy_config,
+        )
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
-
-        if cfg is None:
-            cfg = TD3BC_Base_Config()
 
         self.max_action = max_action
         self.discount = cfg.discount

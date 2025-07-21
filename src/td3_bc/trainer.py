@@ -185,6 +185,7 @@ class Trainer(ABC):
             raise ValueError("No environment specified.")
 
         self.obs_shape = self.envs.single_observation_space.shape
+        self.obs_is_image = not isinstance(self.obs_shape, int) and len(self.obs_shape) in {2, 3}
         self.action_dim = self.envs.single_action_space.shape[0]
         self.max_action = self.envs.single_action_space.high[0]
 
@@ -375,7 +376,8 @@ class OfflineTrainer(Trainer):
         self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
         self._fill_replay_buffer()
 
-        obs_mean, obs_std = self.buffer.compute_dataset_statistics()
+        obs_mean, obs_std = (np.array(0), np.array(255.0)) if self.obs_is_image else self.buffer.compute_dataset_statistics()
+
         self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
 
         self.buffer.save_statistics(self.cfg.dataset_statistics_path)

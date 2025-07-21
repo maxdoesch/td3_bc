@@ -34,15 +34,15 @@ def uncombine_stacked_frames(observation: np.ndarray) -> np.ndarray:
         H, W, C = observation.shape
         num_channels = W // H
 
-        observation = observation.reshape(H, W // num_channels, num_channels, 3)
-        observation = observation.transpose(2, 3, 0, 1)  # (num_channels, 3, H, W // num_channels)
+        observation = observation.reshape(H, num_channels, W // num_channels, 3)
+        observation = observation.transpose(1, 3, 0, 2)  # (num_channels, 3, H, W // num_channels)
         observation = observation.reshape(num_channels * 3, H, W // num_channels)
     elif len(observation.shape) == 4:
         N, H, W, C = observation.shape
         num_channels = W // H
 
-        observation = observation.reshape(N, H, W // num_channels, num_channels, 3)
-        observation = observation.transpose(0, 3, 4, 1, 2)  # (N, num_channels, 3, H, W // num_channels)
+        observation = observation.reshape(N, H, num_channels, W // num_channels, 3)
+        observation = observation.transpose(0, 2, 4, 1, 3)  # (N, num_channels, 3, H, W // num_channels)
         observation = observation.reshape(N, num_channels * 3, H, W // num_channels)
 
     return observation

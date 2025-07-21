@@ -1,3 +1,4 @@
+import draccus
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Tuple, Union
@@ -8,17 +9,52 @@ import torch.nn as nn
 from td3_bc.ftd.image_attention import ImageAttentionSelectorLayers
 import td3_bc.ftd.modules as m
 
+@dataclass
+class PolicyConfig(draccus.ChoiceRegistry):
+    pass
+
+@PolicyConfig.register_subclass('mlp')
+@dataclass
+class MlpPolicyConfig(PolicyConfig):
+    critic_hidden_dim: int = 256
+    critic_n_layers: int = 2
+
+    actor_hidden_dim: int = 256
+    actor_n_layers: int = 2
+
+@PolicyConfig.register_subclass('cnn')
+@dataclass
+class CnnPolicyConfig(PolicyConfig):
+    encoder_hidden_dim: int = 16
+
+    critic_hidden_dim: int = 16
+    critic_n_layers: int = 1
+
+    actor_hidden_dim: int = 16
+    actor_n_layers: int = 1
+
+@PolicyConfig.register_subclass('ftd')
+@dataclass
+class FtdPolicyConfig(PolicyConfig):
+    num_regions: int = 10  # Maximum number of segmented regions
+    num_channels: int = 3  # Number of input channels
+    num_stack: int = 1  # Number of frames stacked together as a single observation
+    num_selector_layers: int = 5  # Number of convolutional layers in the attention selector
+    num_filters: int = 32  # Number of filters in the convolutional layers
+    embed_dim: int = 128  # Dimension of the embedding space for attention
+    num_attention_heads: int = 4  # Number of attention heads
+    num_shared_layers: int = 11  # Number of shared convolutional layers
+    num_head_layers: int = 0  # Number of hidden layers in the head CNN
+    projection_dim: int = 100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
 
 class BaseActor(nn.Module, ABC):
     @abstractmethod
     def __init__(
-        self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float
+        self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float
     ):
         super().__init__()
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
         self.max_action = max_action
 
     @abstractmethod
@@ -27,12 +63,10 @@ class BaseActor(nn.Module, ABC):
 
 
 class BaseCritic(nn.Module, ABC):
-    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int):
+    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int):
         super().__init__()
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
-        self.hidden_dim = hidden_dim
-        self.n_layers = n_layers
 
     @abstractmethod
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -51,7 +85,7 @@ class MlpActor(BaseActor):
     def __init__(
         self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int, max_action: float
     ):
-        super().__init__(obs_shape, action_dim, hidden_dim, n_layers, max_action)
+        super().__init__(obs_shape, action_dim, max_action)
 
         assert isinstance(obs_shape, int) or len(obs_shape) == 1, "MLP Policy requires a 1D observation shape."
 
@@ -73,7 +107,7 @@ class MlpActor(BaseActor):
 
 class MlpCritic(BaseCritic):
     def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, hidden_dim: int, n_layers: int):
-        super().__init__(obs_shape, action_dim, hidden_dim, n_layers)
+        super().__init__(obs_shape, action_dim)
 
         assert isinstance(obs_shape, int) or len(obs_shape) == 1, "MLP Critic requires a 1D observation shape."
 
@@ -135,8 +169,8 @@ class CnnEncoder(nn.Module):
 
 
 class CnnActor(BaseActor):
-    def __init__(self, encoder: CnnEncoder, action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
-        super().__init__(encoder.output_dim, action_dim, hidden_dim, n_layers, max_action)
+    def __init__(self, encoder: CnnEncoder, obs_shape: Tuple[int, int, int], action_dim: int, hidden_dim: int, n_layers: int, max_action: float):
+        super().__init__(obs_shape, action_dim, hidden_dim, n_layers, max_action)
         self.encoder = encoder
 
         self.fc = nn.Sequential(
@@ -154,8 +188,8 @@ class CnnActor(BaseActor):
 
 
 class CnnCritic(BaseCritic):
-    def __init__(self, encoder: CnnEncoder, action_dim: int, hidden_dim: int, n_layers: int):
-        super().__init__(encoder.output_dim, action_dim, hidden_dim, n_layers)
+    def __init__(self, encoder: CnnEncoder, obs_shape: Tuple[int, int, int], action_dim: int, hidden_dim: int, n_layers: int):
+        super().__init__(obs_shape, action_dim, hidden_dim, n_layers)
         self.encoder = encoder
 
         self.action_encoder1 = nn.Sequential(
@@ -191,23 +225,8 @@ class CnnCritic(BaseCritic):
         act_feat = self.action_encoder2(action)
         return self.critic2(torch.cat([obs_feat, act_feat], dim=-1))
 
-
-@dataclass
-class SharedFTDLayersConfig:
-    num_regions: int  # Maximum number of segmented regions
-    num_channels: int  # Number of input channels
-    num_stack: int  # Number of frames stacked together as a single observation
-    num_selector_layers: int  # Number of convolutional layers in the attention selector
-    num_filters: int  # Number of filters in the convolutional layers
-    embed_dim: int  # Dimension of the embedding space for attention
-    num_attention_heads: int  # Number of attention heads
-    num_shared_layers: int  # Number of shared convolutional layers
-    num_head_layers: int  # Number of hidden layers in the head CNN
-    projection_dim: int  # Dimension of the projection space for actor and critic; must match actor and critic input dim
-
-
 class SharedFTDLayers(nn.Module):
-    def __init__(self, obs_shape: tuple[int, int, int], cfg: SharedFTDLayersConfig):
+    def __init__(self, obs_shape: tuple[int, int, int], cfg: FtdPolicyConfig):
         super().__init__()
         self.cfg = cfg
 
@@ -240,9 +259,10 @@ class SharedFTDLayers(nn.Module):
         return obs
 
 
-class FTDActor(nn.Module):
-    def __init__(self, shared_layers: SharedFTDLayers, action_dim: int, max_action: float):
-        super().__init__()
+class FTDActor(BaseActor):
+    def __init__(self, shared_layers: SharedFTDLayers, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float):
+
+        super().__init__(obs_shape, action_dim, max_action)
         self.shared_layers = shared_layers
 
         projection = m.RLProjection(shared_layers.head_cnn.out_shape, shared_layers.cfg.projection_dim)
@@ -257,9 +277,9 @@ class FTDActor(nn.Module):
         return action
 
 
-class FTDCritic(nn.Module):
-    def __init__(self, shared_layers: SharedFTDLayers, action_dim: int):
-        super().__init__()
+class FTDCritic(BaseCritic):
+    def __init__(self, shared_layers: SharedFTDLayers, obs_shape: Union[int, Tuple[int, ...]], action_dim: int):
+        super().__init__(obs_shape, action_dim)
         self.shared_layers = shared_layers
 
         projection = m.RLProjection(shared_layers.head_cnn.out_shape, shared_layers.cfg.projection_dim)
@@ -280,31 +300,34 @@ class FTDCritic(nn.Module):
     def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         proj = self.encoder(obs)
         return self.critic.q2(proj, action)
-
-
-def policy_factory(
-    name: str,
-    obs_dim: int | tuple[int, int, int],
+    
+def get_policy(
+    obs_shape: int | tuple[int, int, int],
     action_dim: int,
     max_action: float,
     device: str,
-    config: SharedFTDLayersConfig | None = None,
-) -> Tuple[BaseActor, BaseCritic]:
-    if name == "mlp":
-        actor = MlpActor(obs_dim, action_dim, hidden_dim=256, n_layers=2, max_action=max_action).to(device)
-        critic = MlpCritic(obs_dim, action_dim, hidden_dim=256, n_layers=2).to(device)
-    elif name == "cnn":
-        shared_encoder = CnnEncoder(obs_dim, hidden_dim=16).to(device)
-        actor = CnnActor(shared_encoder, action_dim, hidden_dim=16, n_layers=1, max_action=max_action).to(device)
-        critic = CnnCritic(shared_encoder, action_dim, hidden_dim=16, n_layers=1).to(device)
-    elif name == "ftd":
-        shared_layers = SharedFTDLayers(obs_dim, config)
-        actor = FTDActor(shared_layers, action_dim, max_action).to(device)
-        critic = FTDCritic(shared_layers, action_dim).to(device)
+    cfg: Union[
+        MlpPolicyConfig,
+        CnnPolicyConfig,
+        FtdPolicyConfig,
+    ],
+) -> Tuple:
+    if type(cfg) is MlpPolicyConfig:
+        actor = MlpActor(obs_shape, action_dim, hidden_dim=cfg.actor_hidden_dim, n_layers=cfg.actor_n_layers, max_action=max_action).to(device)
+        critic = MlpCritic(obs_shape, action_dim, hidden_dim=cfg.critic_hidden_dim, n_layers=cfg.critic_n_layers).to(device)
+    elif type(cfg) is CnnPolicyConfig:
+        shared_encoder = CnnEncoder(obs_shape, hidden_dim=cfg.encoder_hidden_dim).to(device)
+        actor = CnnActor(shared_encoder, obs_shape, action_dim, hidden_dim=cfg.actor_hidden_dim, n_layers=cfg.actor_n_layers, max_action=max_action).to(device)
+        critic = CnnCritic(shared_encoder, obs_shape, action_dim, hidden_dim=cfg.critic_hidden_dim, n_layers=cfg.critic_n_layers).to(device)
+    elif type(cfg) is FtdPolicyConfig:
+        shared_layers = SharedFTDLayers(obs_shape, cfg)
+        actor = FTDActor(shared_layers, obs_shape, action_dim, max_action).to(device)
+        critic = FTDCritic(shared_layers, obs_shape, action_dim).to(device)
     else:
-        raise ValueError(f"Unknown policy name: {name}")
+        raise ValueError(f"Unknown Policy Configuration type: {type(cfg)}")
 
     return actor, critic
+
 
 
 if __name__ == "__main__":

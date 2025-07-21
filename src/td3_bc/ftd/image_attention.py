@@ -9,7 +9,7 @@ class ImageAttentionSelectorLayers(nn.Module):
     def __init__(self, obs_shape, region_num, in_channels, stack_num, num_layers, num_filters, embed_dim, num_heads):
         super().__init__()
 
-        self.preprocess_layer = nn.Sequential(*[NormalizeImg()])
+        #self.preprocess_layer = nn.Sequential(*[NormalizeImg()]) #@maxdoesch normalization is taken care of in trainer.py via buffer
         self.layers = [nn.Conv2d(in_channels, num_filters, 3, stride=2, padding=1)]
         self.shape = obs_shape[1:]
         self.region_num = region_num
@@ -40,7 +40,7 @@ class ImageAttentionSelectorLayers(nn.Module):
         S, R, C, H, W = self.stack_num, self.region_num + 1, self.in_channels, self.shape[0], self.shape[1]
         x = x.reshape(-1, C, H, W)
         B = x.shape[0] // S // R
-        x = self.preprocess_layer(x)
+        #x = self.preprocess_layer(x)
 
         mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
         mask = torch.where(mask != 0, False, True)
