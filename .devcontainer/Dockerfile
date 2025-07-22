@@ -86,7 +86,7 @@ RUN cd / && pip install uv && \
     git clone https://github.com/maxdoesch/td3_bc.git && \
     cd /td3_bc && \
     uv sync && \
-    pip install -e .
+    pip install -e .[dm-control, expert-gen]
 
 ###############################################################################
 

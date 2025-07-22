@@ -207,7 +207,11 @@ class TD3BC_FTD(TD3BC_Base):
         self.total_it += 1
 
         # Slow down the update frequency of the predictors
-        if self.total_it > self.predictors_warmup_steps and self.total_it % self.predictors_update_slow_freq == 0:
+        if (
+            self.predictors_update_freq != 0
+            and self.total_it > self.predictors_warmup_steps
+            and self.total_it % self.predictors_update_slow_freq == 0
+        ):
             self.unsupervised_update_freq = self.unsupervised_update_freq + 1
             logging.debug(f"Slowing predictors update frequency to {self.unsupervised_update_freq}.")
 
@@ -231,7 +235,11 @@ class TD3BC_FTD(TD3BC_Base):
             self.update_actor_target()
 
         # Update auxiliary predictors
-        if self.total_it > self.predictors_warmup_steps and self.total_it % self.predictors_update_freq == 0:
+        if (
+            self.predictors_update_freq != 0
+            and self.total_it > self.predictors_warmup_steps
+            and self.total_it % self.predictors_update_freq == 0
+        ):
             if self.reward_factor != 0.0:
                 reward_predictor_loss = self.update_reward_predictor(batch["obs"], batch["action"], batch["reward"])
                 metrics["train/reward_predictor_loss"] = reward_predictor_loss
@@ -243,7 +251,7 @@ class TD3BC_FTD(TD3BC_Base):
                 metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
 
         if self.total_it % self.log_img_freq == 0:
-            metrics["train/raw_images"] = wandb.Image(batch["obs"][-1][:3])
+            metrics["train/raw_images"] = wandb.Image(batch["obs"][0][-3:])
             metrics["train/ftd_images"] = wandb.Image(self.select_image(batch["obs"][0])[1])
 
         metrics["train/time"] = time.time() - start_time

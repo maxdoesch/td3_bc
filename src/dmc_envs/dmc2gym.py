@@ -223,6 +223,7 @@ class DistractionDMCWrapper(DMCWrapper):
         frame_skip: int = 1,
         environment_kwargs: Optional[Dict] = None,
         channels_first: bool = True,
+        is_train: bool = True,
         video_dir: Optional[str] = None,
     ):
         super().__init__(
@@ -247,12 +248,14 @@ class DistractionDMCWrapper(DMCWrapper):
 
         self._env.physics.reload_from_xml_string(xml_model_string, assets=ASSETS)
 
+        self._is_train = is_train
+
         self._video_dir = video_dir if video_dir else os.path.join(os.path.dirname(__file__), "videos")
         self._video_paths = [
             os.path.join(self._video_dir, f) for f in os.listdir(self._video_dir) if f.endswith(".mp4")
         ]
 
-        self._video_index = 0
+        self._video_index = 0 if self._is_train else int(0.8 * len(self._video_paths))
         self._current_frame = 0
         self._data = None
 
@@ -262,7 +265,9 @@ class DistractionDMCWrapper(DMCWrapper):
         return np.moveaxis(video, -1, 1) if self._channels_first else video
 
     def reset(self, *, seed=None, options=None):
-        self._video_index = np.random.randint(0, len(self._video_paths))
+        self._video_index = np.random.randint(
+            0 if self._is_train else int(0.8 * len(self._video_paths)), len(self._video_paths)
+        )
         self._data = self._load_video(self._video_paths[self._video_index])
         self._data = interpolate_bg(self._data, (self._height, self._width))
 

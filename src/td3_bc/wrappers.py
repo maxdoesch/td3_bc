@@ -1,11 +1,13 @@
 from collections import deque
 from dataclasses import dataclass
+from typing import Tuple
 
 import numpy as np
 import torch
 import gymnasium as gym
 
 from td3_bc.segmentation import MobileSAMV2, MobileSAMV2Config
+from td3_bc.utils import resize_stacked_images
 
 
 @dataclass
@@ -34,7 +36,7 @@ class FTDObservationWrapper(gym.ObservationWrapper):
 
         # Load MobileSAMv2
         self.mobilesamv2 = MobileSAMV2(config.sam_config)
-        # self.mobilesamv2.enable_logging(False)
+        self.mobilesamv2.enable_logging(False)
 
         # Set new observation space
         old_shape = env.observation_space.shape
@@ -158,6 +160,28 @@ class LazyFrames(object):
 
     def frame(self, i):
         return self._force()[i * 3 : (i + 1) * 3]
+
+
+class ResizeObservation(gym.ObservationWrapper):
+    """Resize the observation to a given shape."""
+
+    def __init__(self, env, shape: Tuple, is_channels_first: bool = True):
+        super().__init__(env)
+        self.shape = shape
+        self.is_channels_first = is_channels_first
+
+        if self.is_channels_first:
+            self.observation_space = gym.spaces.Box(
+                low=0, high=255, shape=(env.observation_space.shape[0], shape[0], shape[1]), dtype=np.uint8
+            )
+        else:
+            self.observation_space = gym.spaces.Box(
+                low=0, high=255, shape=(shape[0], shape[1], env.observation_space.shape[-1]), dtype=np.uint8
+            )
+
+    def observation(self, observation):
+        observation = resize_stacked_images(observation, self.shape)
+        return observation
 
 
 class FrameStack(gym.Wrapper):

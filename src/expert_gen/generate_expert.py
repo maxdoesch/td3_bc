@@ -3,16 +3,16 @@ import argparse
 import imageio
 import numpy as np
 import gymnasium as gym
-import time
+import tqdm
 
 from sbx import PPO
 from gymnasium.wrappers import NormalizeObservation
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from minari import DataCollector, delete_dataset, list_local_datasets
+from minari import DataCollector, list_local_datasets
 
 import dmc_envs  # noqa: F401
 from td3_bc.segmentation import MobileSAMV2Config
-from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig
+from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation
 import td3_bc.utils as utils
 
 # Metadata
@@ -22,6 +22,8 @@ AUTHOR_EMAIL = "doesch.maximilian@gmail.com"
 
 # Skill level thresholds
 SKILL_LEVEL = {"expert": 1.0, "medium": 0.4, "simple": 0.2}
+
+RAW_IMG_RESOLUTION = 256
 
 
 class CombineStackedFrames(gym.ObservationWrapper):
@@ -80,19 +82,20 @@ def generate_expert_dataset(
     env = gym.make(
         env_id,
         obs_type="pixels",
-        height=image_size,
-        width=image_size,
+        height=RAW_IMG_RESOLUTION,
+        width=RAW_IMG_RESOLUTION,
         channels_first=True if gen_segmentation else False,
-        video_dir='/td3_bc/misc/videos'
+        is_train=True,
     )
 
     if gen_segmentation:
-        sam_config = MobileSAMV2Config(image_size=image_size, confidence_threshold=0.5)
+        sam_config = MobileSAMV2Config(image_size=RAW_IMG_RESOLUTION, confidence_threshold=0.5)
         env_config = FTDObservationWrapperConfig(
             sam_config=sam_config,
             add_original_frame=True,
         )
         env = FTDObservationWrapper(env, config=env_config)
+        env = ResizeObservation(env, shape=(image_size, image_size), is_channels_first=True)
         env = CombineStackedFrames(env)
 
     env_dc = DataCollector(env, record_infos=False, data_format="arrow")
@@ -126,7 +129,7 @@ def generate_expert_dataset(
         gif_dir = os.path.join(expert_path, "rollout")
         os.makedirs(gif_dir, exist_ok=True)
 
-    for _ in range(total_steps):
+    for _ in tqdm.tqdm(range(total_steps), desc=f"Generating dataset for {skill_level} skill level"):
         action, _ = model.predict(obs, deterministic=True)
         obs, reward, terminated, truncated, info = env.step(action)
         # print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")

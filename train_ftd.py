@@ -4,16 +4,17 @@ import gymnasium as gym
 from td3_bc.trainer import get_trainer, TrainerConfig
 import dmc_envs  # noqa: F401
 from td3_bc.segmentation import MobileSAMV2Config
-from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig
+from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation
 
 
 def make_vec(env_id: str):
-    env = gym.make(env_id, obs_type="pixels", channels_first=True, height=256, width=256, video_dir='/td3_bc/misc/videos')
+    env = gym.make(env_id, obs_type="pixels", channels_first=True, height=256, width=256, is_train=False)
     env_config = FTDObservationWrapperConfig(
         sam_config=MobileSAMV2Config(image_size=256, confidence_threshold=0.5),
         add_original_frame=True,
     )
     env = FTDObservationWrapper(env, config=env_config)
+    env = ResizeObservation(env, shape=(84, 84), is_channels_first=True)
     return env
 
 
