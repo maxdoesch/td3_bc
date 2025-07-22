@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 import wandb
 
-from td3_bc.buffer import ReplayBuffer
+from td3_bc.buffer import ReplayBuffer, ImageReplayBuffer
 import td3_bc.td3_bc as td3_bc
 import td3_bc.td3_bc_ftd as td3_bc_ftd
 from td3_bc.evaluator import Evaluator
@@ -375,14 +375,20 @@ class OfflineTrainer(Trainer):
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
-        self._fill_replay_buffer()
+        if self.obs_is_image:
+            self.buffer = ImageReplayBuffer(
+                obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device
+            )
+            
+            self._fill_replay_buffer()
+        else:
+            self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
 
-        obs_mean, obs_std = (
-            (np.array(0), np.array(255.0)) if self.obs_is_image else self.buffer.compute_dataset_statistics()
-        )
+            self._fill_replay_buffer()
 
-        self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
+            obs_mean, obs_std = self.buffer.compute_dataset_statistics()
+
+            self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
 
         self.buffer.save_statistics(self.cfg.dataset_statistics_path)
 

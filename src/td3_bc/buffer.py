@@ -12,13 +12,191 @@ import td3_bc.utils as utils
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3):
     return (array - mean) / (std + eps)
 
+class ImageReplayBuffer:
+    def __init__(
+        self,
+        obs_shape: Tuple[int, ...],
+        action_dim: int,
+        max_size: int = int(1e5),
+        device: Optional[str] = None,
+    ):
+        self.max_size = max_size
+        self.ptr = 0
+        self.size = 0
+
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+
+        assert isinstance(obs_shape, tuple) and len(obs_shape) == 3, "obs_shape must be a tuple of length 3."
+
+        self.obs_shape = obs_shape
+        self.action_dim = action_dim
+
+        self.obs = np.zeros((max_size,) + self.obs_shape, dtype=np.uint8)
+        self.action = np.zeros((max_size, action_dim), dtype=np.float32)
+        self.reward = np.zeros((max_size, 1), dtype=np.float32)
+        self.not_done = np.zeros((max_size, 1), dtype=np.float32)
+
+        self.obs_mean = np.array(0, dtype=np.float32)
+        self.obs_std = np.array(255, dtype=np.float32)
+
+    def add(self, obs: np.ndarray, action: np.ndarray, reward: np.ndarray, done: np.ndarray):
+        """
+        Add transitions to the replay buffer in a vectorized way.
+
+        Args:
+            obs (np.ndarray): Unnormalized current obs, shape (n_env, *obs_shape) or (*obs_shape,)
+            action (np.ndarray): Action taken, shape (n_env, action_dim) or (action_dim,)
+            reward (np.ndarray): Reward received, shape (n_env, 1) or (1,)
+            done (np.ndarray): Done flag, shape (n_env, 1) or (1,)
+        """
+        # Convert to batch if single transition
+        obs = np.expand_dims(obs, 0) if obs.ndim == len(self.obs_shape) else obs
+        action = np.expand_dims(action, 0) if action.ndim == 1 else action
+        reward = np.expand_dims(reward, 1) if reward.ndim == 1 else reward
+        done = np.expand_dims(done, 1) if done.ndim == 1 else done
+
+        assert obs.shape[0] == action.shape[0] == reward.shape[0] == done.shape[0], (
+            "All inputs must have the same first dimension (number of environments)."
+        )
+
+        n_env = obs.shape[0]
+
+        indices = np.arange(self.ptr, self.ptr + n_env) % self.max_size
+
+        self.obs[indices] = obs
+        self.action[indices] = action
+        self.reward[indices] = reward
+        self.not_done[indices] = 1 - done
+
+        self.ptr = (self.ptr + n_env) % self.max_size
+        self.size = min(self.size + n_env, self.max_size)
+
+    def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
+        """
+        Sample a batch of transitions from the replay buffer.
+
+        Args:
+            batch_size (int): Number of transitions to sample.
+
+        Returns:
+            Dict[str, torch.Tensor]: A dictionary containing the following keys:
+                - "obs": Tensor of shape (batch_size, *obs_shape) with normalized observations.
+                - "action": Tensor of shape (batch_size, action_dim) with actions taken.
+                - "next_obs": Tensor of shape (batch_size, *obs_shape) with normalized next observations.
+                - "reward": Tensor of shape (batch_size) with rewards received.
+                - "not_done": Tensor of shape (batch_size) indicating whether the episode has not ended.
+        """
+        idx = np.random.randint(0, self.size - 1, size=batch_size)
+
+        obs = normalize(self.obs[idx], self.obs_mean, self.obs_std)
+        next_obs = normalize(self.obs[idx + 1], self.obs_mean, self.obs_std)
+
+        return {
+            "obs": torch.tensor(obs, dtype=torch.float32).to(self.device),
+            "action": torch.tensor(self.action[idx], dtype=torch.float32).to(self.device),
+            "next_obs": torch.tensor(next_obs, dtype=torch.float32).to(self.device),
+            "reward": torch.tensor(self.reward[idx], dtype=torch.float32).to(self.device),
+            "not_done": torch.tensor(self.not_done[idx], dtype=torch.float32).to(self.device),
+        }
+
+    #    def convert_dict(self, dict_dataset):
+    #        """
+    #        Populate the replay buffer with transitions from a dictionary dataset.
+    #        """
+    #        for episode in range(len(dict_dataset["obs"])):
+    #            transition = {
+    #                "obs": dict_dataset["obs"][episode],
+    #                "action": dict_dataset["acts"][episode],
+    #                "next_obs": dict_dataset["next_obs"][episode],
+    #                "reward": dict_dataset["rews"][episode],
+    #                "done": dict_dataset["dones"][episode],
+    #            }
+    #
+    #            self.add(**transition)
+    #
+    #        self.obs = self.obs[: self.size]
+    #        self.action = self.action[: self.size]
+    #        self.reward = self.reward[: self.size]
+    #        self.next_obs = self.next_obs[: self.size]
+    #        self.not_done = self.not_done[: self.size]
+
+    def convert_dict(self, dict_dataset):
+        """
+        Populate the replay buffer with transitions from a dictionary dataset.
+
+        Args:
+            dict_dataset (dict): A dictionary containing episode data with the following keys:
+                - "obs" (list of np.ndarray): Observations for each episode, where each element is an array of shape (episode_length, state_dim).
+                - "acts" (list of np.ndarray): Actions for each episode, where each element is an array of shape (episode_length, action_dim).
+                - "rews" (list of np.ndarray): Rewards for each episode, where each element is an array of shape (episode_length,).
+        """
+
+        for episode in range(len(dict_dataset["acts"])):
+            transition = {
+                "obs": np.array(dict_dataset["obs"][episode][:-1]),
+                "action": np.array(dict_dataset["acts"][episode]),
+                "reward": np.array(dict_dataset["rews"][episode]),
+                "done": np.concatenate(
+                    [
+                        np.zeros_like(dict_dataset["rews"][episode][:-1]),
+                        np.ones_like(dict_dataset["rews"][episode][-1:]),
+                    ]
+                ),
+            }
+
+            self.add(**transition)
+
+        self.obs = self.obs[: self.size]
+        self.action = self.action[: self.size]
+        self.reward = self.reward[: self.size]
+        self.not_done = self.not_done[: self.size]
+
+    def convert_minari(self, dataset: minari.MinariDataset):
+        # assert dataset.observation_space.shape == self.obs_shape or dataset.observation_space.shape[::-1] == self.obs_shape, "Observation dimension mismatch."
+
+        assert dataset.action_space.shape[0] == self.action_dim, "Action dimension mismatch."
+
+        for episode in dataset.iterate_episodes():
+            observations = utils.uncombine_stacked_frames(episode.observations)
+            transition = {
+                "obs": observations[:-1],
+                "action": episode.actions,
+                "reward": episode.rewards,
+                "done": episode.terminations,
+            }
+            self.add(**transition)
+
+        self.obs = self.obs[: self.size]
+        self.action = self.action[: self.size]
+        self.reward = self.reward[: self.size]
+        self.not_done = self.not_done[: self.size]
+
+    def save_statistics(self, stats_path: str):
+        """
+        Save dataset statistics (mean and standard deviation of observations) to a JSON file.
+
+        Args:
+            stats_path (str): Directory path or file path to save the statistics JSON file.
+        """
+
+        if not stats_path.endswith(".json"):
+            stats_path = os.path.join(stats_path, "dataset_statistics.json")
+
+        stats = {
+            "obs_mean": self.obs_mean.tolist(),
+            "obs_std": self.obs_std.tolist(),
+        }
+        with open(stats_path, "w") as f:
+            json.dump(stats, f, indent=4)
 
 class ReplayBuffer:
     def __init__(
         self,
         obs_shape: Union[int, Tuple[int, ...]],
         action_dim: int,
-        max_size: int = int(1e3),
+        max_size: int = int(1e6),
         device: Optional[str] = None,
     ):
         self.max_size = max_size

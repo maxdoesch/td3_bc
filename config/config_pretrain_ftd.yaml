@@ -1,8 +1,8 @@
 train_steps: 100000
-eval_freq: 1000
-eval_episodes: 4
-checkpoint_freq: 5000
-batch_size: 256
+eval_freq: 10000
+eval_episodes: 2
+checkpoint_freq: 10000
+batch_size: 32
 
 seeds: 42
 n_seeds: 5
@@ -53,4 +53,4 @@ train_mode:
     predictors_update_slow_freq: 50_000
     predictors_warmup_steps: 10_000
 
-    log_img_freq: 100
+    log_img_freq: 500
