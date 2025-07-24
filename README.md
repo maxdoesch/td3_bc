@@ -11,11 +11,7 @@ Follow these steps to set up your development environment.
 ### ✅ Requirements
 
 * [`uv`](https://github.com/astral-sh/uv) for managing the virtual environment
-* [`gdown`](https://github.com/wkentaro/gdown) for downloading pretrained weights (optional, only needed for FTD support):
-
-  ```bash
-  python -m pip install gdown
-  ```
+* [`gdown`](https://github.com/wkentaro/gdown) for downloading pretrained weights (optional, only needed for FTD support)
 
 ---
 
@@ -53,23 +49,14 @@ sed -i "s/return torch.load(file, map_location='cpu'), file/return torch.load(fi
    uv venv
    ```
 
-3. Install the dependencies:
+3. Install dependencies (`gen-expert`, `dm-control`, `ftd`):
 
-   * For core TD3-BC only:
+   ```bash
+   uv sync                      # core TD3-BC only
+   uv sync --all-extras         # full (gen-expert, dm-control, ftd)
+   uv sync --extra <name>       # specific extra
+   ```
 
-     ```bash
-     uv sync
-     ```
-   * For all optional extras (`gen-expert`, `dm-control`, `ftd`):
-
-     ```bash
-     uv sync --all-extras
-     ```
-   * For specific optional extras:
-
-     ```bash
-     uv sync --extra <dependency>
-     ```
 ---
 
 ## 🛠️ Usage Guide
