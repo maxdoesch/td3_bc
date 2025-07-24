@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from mobilesamv2.promt_mobilesamv2 import ObjectAwareModel
 from mobilesamv2 import sam_model_registry, SamPredictor
+import mobilesamv2
 
 
 @dataclass
@@ -25,7 +26,7 @@ class MobileSAMV2:
     This class provides functionality to segment all objects in an input image using MobileSAMv2.
     """
 
-    MOBILE_SAM_V2_PATH = "/MobileSAM/MobileSAMv2"
+    MOBILE_SAM_V2_PATH = os.path.dirname(os.path.dirname(mobilesamv2.__file__))
     PROMPT_GUIDED_PATH = os.path.join(MOBILE_SAM_V2_PATH, "PromptGuidedDecoder/Prompt_guided_Mask_Decoder.pt")
     OBJ_MODEL_PATH = os.path.join(MOBILE_SAM_V2_PATH, "weight/ObjectAwareModel.pt")
     IMAGE_ENCODER_CHECKPOINT_PATH = os.path.join(MOBILE_SAM_V2_PATH, "weight/l2.pt")

@@ -1,35 +1,112 @@
 # 🧠 Offline to Online TD3-BC
 
-A repository for offline to online RL using the TD3-BC algorithm. [\[1\]](#ref)
+A repository for offline-to-online reinforcement learning using the TD3-BC algorithm. [\[1\]](#ref_td3_bc)
 
 ---
 
 ## 🚀 First-Time Setup
 
-Follow these steps to set up your development environment:
+Follow these steps to set up your development environment.
 
-1. **Create a virtual environment with [`uv`](https://github.com/astral-sh/uv):**
+### ✅ Requirements
+
+* [`uv`](https://github.com/astral-sh/uv) for managing the virtual environment
+* `gdown` for downloading pretrained weights (optional, only needed for FTD support):
+
+  ```bash
+  python -m pip install gdown
+  ```
+
+---
+
+### 🧩 Optional: Install MobileSAMv2 for FTD
+
+If you plan to use TD3-BC with **FTD (Focus-Then-Decide)** [\[2\]](#ref_ftd):
+
+1. Go to the parent directory of `td3_bc`:
+
+   ```bash
+   cd ..
+   ```
+
+2. Clone the MobileSAM repository:
+
+   ```bash
+   git clone https://github.com/ChaoningZhang/MobileSAM.git
+   ```
+
+3. Navigate into the MobileSAMv2 directory:
+
+   ```bash
+   cd MobileSAM/MobileSAMv2
+   ```
+
+4. Download the weights and unzip:
+
+   ```bash
+   gdown https://drive.google.com/uc?id=1dE-YAG-1mFCBmao2rHDp0n-PP4eH7SjE
+   unzip weight.zip
+   rm -f weight.zip
+   ```
+
+5. Apply a patch for weight loading:
+
+   ```bash
+   sed -i "s/return torch.load(file, map_location='cpu'), file/return torch.load(file, map_location='cpu', weights_only=False), file/" ultralytics/nn/tasks.py
+   ```
+
+---
+
+### 🧠 Install td3-bc
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/maxdoesch/td3_bc.git
+   cd td3_bc
+   ```
+
+2. Create a virtual environment using `uv`:
 
    ```bash
    uv venv
    ```
 
-2. **Install all dependencies:**
+3. Install the dependencies:
 
-   ```bash
-   uv sync
-   ```
+   * For core TD3-BC only:
 
+     ```bash
+     uv sync
+     ```
+   * For all optional extras (`gen-expert`, `dm-control`, `ftd`):
+
+     ```bash
+     uv sync --all-extras
+     ```
+   * For specific optional extras:
+
+     ```bash
+     uv sync --extra <dependency>
+     ```
 ---
 
 ## 🛠️ Usage Guide
 
 ### ✅ Activate the Virtual Environment
 
-Before running anything, activate the environment:
+Before running any scripts, activate the virtual environment:
 
 ```bash
 source .venv/bin/activate
+```
+
+### 🧩 (Optional) Enable FTD Support
+
+If you're using **FTD (Focus-Then-Decide)**, make sure to add **MobileSAMv2** to your `PYTHONPATH`:
+
+```bash
+export PYTHONPATH="${PYTHONPATH}:../MobileSAM/MobileSAMv2"
 ```
 
 ### 🏋️‍♀️ Start Training
@@ -65,7 +142,7 @@ Replace `<checkpoint_dir>` with the path to your saved model directory and `<che
 
 ## 📊 Results
 
-We evaluate **TD3-BC** across both offline and online learning phases using the [Minari](https://github.com/Farama-Foundation/Minari) datasets on **Hopper** and **HalfCheetah** environments. The hyperparameters were selected as stated in [\[1\]](#ref). Each model is evaluated over multiple seeds and reported as *mean ± std* normalized scores. The improvements from each training stage are highlighted in green (positive) or red (negative).
+We evaluate **TD3-BC** across both offline and online learning phases using the [Minari](https://github.com/Farama-Foundation/Minari) datasets on **Hopper** and **HalfCheetah** environments. The hyperparameters were selected as stated in [\[1\]](#ref_td3_bc). Each model is evaluated over multiple seeds and reported as *mean ± std* normalized scores. The improvements from each training stage are highlighted in green (positive) or red (negative).
 
 <table border="1" class="dataframe">
   <thead>
@@ -120,4 +197,6 @@ We evaluate **TD3-BC** across both offline and online learning phases using the 
 
 This implementation is inspired by the methods proposed in:
 
-<a name="ref">\[1]</a> A. Beeson and G. Montana, “Improving TD3-BC: Relaxed Policy Constraint for Offline Learning and Stable Online Fine-Tuning,” *arXiv preprint arXiv:2211.11802*, 2022. [https://doi.org/10.48550/arXiv.2211.11802](https://doi.org/10.48550/arXiv.2211.11802)
+<a name="ref_td3_bc">\[1]</a> A. Beeson and G. Montana, “Improving TD3-BC: Relaxed Policy Constraint for Offline Learning and Stable Online Fine-Tuning,” *arXiv preprint arXiv:2211.11802*, 2022. [https://doi.org/10.48550/arXiv.2211.11802](https://doi.org/10.48550/arXiv.2211.11802) 
+
+<a name="ref_ftd">\[2]</a> C. Chen et al., “Focus-Then-Decide: Segmentation-Assisted Reinforcement Learning,” *AAAI 2024*, [https://doi.org/10.1609/aaai.v38i10.29002](https://doi.org/10.1609/aaai.v38i10.29002)

@@ -12,14 +12,6 @@ dependencies = [
     "torchvision",
     "tqdm>=4.67.1",
     "wandb>=0.19.11",
-    "opencv-python-headless",
-    "matplotlib",
-    "pandas",
-    "timm",
-    "torchpack",
-    "onnx",
-    "onnxsim",
-    "onnxruntime",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +22,12 @@ dm-control = [
 expert-gen = [
     "sbx-rl>=0.20.0",
     "tensorboard>=2.19.0",
+]
+ftd = [
+    "mobile-sam[all]",
+    "onnxsim>=0.4.36",
+    "timm>=1.0.19",
+    "torchpack>=0.3.1",
 ]
 
 [build-system]
@@ -52,3 +50,6 @@ dev = [
 
 [tool.ruff]
 line-length = 120
+
+[tool.uv.sources]
+mobile-sam = { path = "../MobileSAM" }
