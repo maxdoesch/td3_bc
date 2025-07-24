@@ -8,7 +8,7 @@
 
 	// The 'workspaceFolder' property is the path VS Code should open by default when
 	// connected. Corresponds to a volume mount in .devcontainer/docker-compose.yml
-	"workspaceFolder": "/td3_bc",
+	"workspaceFolder": "/home/smlr/td3_bc",
 
 	"customizations": {
         "vscode": {
@@ -42,5 +42,5 @@
 	// "shutdownAction": "none",
 
 	// Uncomment the next line to use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "uname -a",
+	"postCreateCommand": "cd /home/smlr/td3_bc && uv sync --all-extras && source .venv/bin/activate",
 }

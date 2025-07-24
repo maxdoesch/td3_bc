@@ -9,6 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG USERNAME=smlr
 ARG USER_UID=1000
 ARG USER_GID=$USER_UID
+ARG USER_HOME=/home/$USERNAME
 
 # Delete existing user if it exists
 RUN if getent passwd ${USER_UID}; then \
@@ -27,7 +28,7 @@ RUN groupadd --gid $USER_GID $USERNAME \
 # Set up sudo
 RUN apt-get update \
   && apt-get install -y sudo \
-  && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME\
+  && echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME\
   && chmod 0440 /etc/sudoers.d/$USERNAME \
   && rm -rf /var/lib/apt/lists/*
 
@@ -56,6 +57,14 @@ RUN apt-get update && \
 
 ###############################################################################
 
+#### Install EGL for Headless Rendering ####
+
+RUN apt-get update && \
+    apt-get install -y libglew-dev libopengl0 && \
+    python -m pip install PyOpenGL_accelerate
+
+###############################################################################
+
 SHELL ["/bin/bash", "-c"]
 
 ENV SHELL=/bin/bash
@@ -63,32 +72,36 @@ RUN ln -sf /bin/bash /bin/sh
 
 ###############################################################################
 
-#### Python Environment ####
+#### Install Python Packages Requirements ####
 
-# MobileSAMv2
-RUN cd / && \
-    git clone https://github.com/ChaoningZhang/MobileSAM.git && \
-    cd /MobileSAM/MobileSAMv2 && \
-    python -m pip install gdown && \
-    gdown https://drive.google.com/uc?id=1dE-YAG-1mFCBmao2rHDp0n-PP4eH7SjE && \
-    unzip weight.zip && \
-    rm -f weight.zip && \
-    sed -i "s/return torch.load(file, map_location='cpu'), file/return torch.load(file, map_location='cpu', weights_only=False), file/" /MobileSAM/MobileSAMv2/ultralytics/nn/tasks.py && \
-    cd .. && python -m pip install -e .
-
-ENV PYTHONPATH="${PYTHONPATH}:/MobileSAM/MobileSAMv2"
-
-###############################################################################
-
-#### Setup Repo ####
-
-RUN cd / && pip install uv && \
-    git clone https://github.com/maxdoesch/td3_bc.git && \
-    cd /td3_bc && \
-    uv sync && \
-    pip install -e .[dm-control, expert-gen]
+RUN python -m pip install gdown && \
+    python -m pip install uv
 
 ###############################################################################
 
 # Switch to non-root user
 USER $USERNAME
+
+#### Python Environment ####
+
+# MobileSAMv2
+WORKDIR $USER_HOME
+RUN git clone https://github.com/ChaoningZhang/MobileSAM.git && \
+    cd $USER_HOME/MobileSAM/MobileSAMv2 && \
+    gdown https://drive.google.com/uc?id=1dE-YAG-1mFCBmao2rHDp0n-PP4eH7SjE && \
+    unzip weight.zip && \
+    rm -f weight.zip && \
+    sed -i "s/return torch.load(file, map_location='cpu'), file/return torch.load(file, map_location='cpu', weights_only=False), file/" $USER_HOME/MobileSAM/MobileSAMv2/ultralytics/nn/tasks.py
+
+ENV PYTHONPATH="${USER_HOME}/MobileSAM/MobileSAMv2:${PYTHONPATH:-}"
+
+###############################################################################
+
+#### Setup Repo ####
+
+WORKDIR $USER_HOME
+RUN git clone https://github.com/maxdoesch/td3_bc.git && \
+    cd td3_bc && \
+    uv sync --all-extras
+
+###############################################################################

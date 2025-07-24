@@ -15,8 +15,8 @@ services:
       - /etc/machine-id:/etc/machine-id
       - /mnt:/mnt
       - /tmp/.X11-unix:/tmp/.X11-unix
-      - ../:/td3_bc
-    working_dir: /td3_bc
+      - ../:/home/smlr/td3_bc
+    working_dir: /home/smlr/td3_bc
     privileged: true
     runtime: nvidia
     network_mode: host
