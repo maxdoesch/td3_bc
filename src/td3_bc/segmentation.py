@@ -136,29 +136,14 @@ class MobileSAMV2:
         # Assert shape and channels
         self.assert_image_format(image)
 
-        # if obj_results is None reduce confidence threshold and try again
-        confidence_th = self.confidence_threshold
-        while True:
-            obj_results = self.obj_aware_model(
-                image,
-                device=self.device,
-                retina_masks=True,
-                imgsz=self.image_size,
-                conf=self.confidence_threshold,
-                iou=self.iou,
-            )
-
-            if obj_results is not None and len(obj_results) > 0:
-                break
-
-            logging.warning(
-                f"No objects detected with confidence {confidence_th:.2f}. "
-                f"Reducing confidence threshold to {confidence_th - 0.1:.2f} and retrying."
-            )
-
-            confidence_th -= 0.1
-            if confidence_th < 0.1:
-                return None
+        obj_results = self.obj_aware_model(
+            image,
+            device=self.device,
+            retina_masks=True,
+            imgsz=self.image_size,
+            conf=self.confidence_threshold,
+            iou=self.iou,
+        )
 
         self.predictor.set_image(image)
 

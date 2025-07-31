@@ -54,17 +54,16 @@ class FTDObservationWrapper(gym.ObservationWrapper):
             dtype=np.uint8,
         )
 
-    def __get_predictions(self, observation: torch.Tensor) -> dict[str, torch.Tensor]:
+    def __get_predictions(self, observation: np.ndarray) -> dict[str, torch.Tensor]:
         """
         Generate masks for the input observation tensor using MobileSAMv2.
         """
-        # If the image is grayscale, convert it to RGB by repeating the channel
-        image = np.array(observation)
-        if image.shape[0] == 1:
-            image = np.concatenate([image, image, image], axis=0)
+        # If the image is grayscale, convert it to RGB by repeating the channels
+        if observation.shape[0] == 1:
+            observation = np.repeat(observation, 3, axis=0)
 
-        image = np.transpose(image, [1, 2, 0])
-        pred = self.mobilesamv2.get_prediction(image)
+        observation = np.transpose(observation, [1, 2, 0])
+        pred = self.mobilesamv2.get_prediction(observation)
 
         return pred
 
@@ -104,10 +103,9 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         sorted_indices = self.__sort_predictions(pred)
         masks = pred["masks"][sorted_indices]
         masks = self.__pad_or_trim_masks(masks)
-        masks = masks.float()  # (R, H, W)
 
-        full_frame = torch.tensor(observation, device=masks.device).unsqueeze(0)  # (1, C, H, W)
-        masked_segments = masks.unsqueeze(1) * full_frame  # (R, C, H, W)
+        full_frame = torch.from_numpy(observation).to(masks.device).unsqueeze(0)  # (1, C, H, W)
+        masked_segments = full_frame.masked_fill(~masks.bool().unsqueeze(1), 0)
 
         # Append original frame last and reshape
         if self.config.add_original_frame:
@@ -117,7 +115,7 @@ class FTDObservationWrapper(gym.ObservationWrapper):
 
         all_segments = all_segments.reshape(self.num_regions_with_original * self.config.num_channels, self.H, self.W)
 
-        return all_segments.cpu().numpy().astype(np.uint8)
+        return all_segments.byte().cpu().numpy()
 
 
 class LazyFrames(object):

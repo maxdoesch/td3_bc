@@ -60,8 +60,12 @@ RUN apt-get update && \
 #### Install EGL for Headless Rendering ####
 
 RUN apt-get update && \
-    apt-get install -y libglew-dev libopengl0 && \
-    python -m pip install PyOpenGL_accelerate
+    apt-get install -y libegl1-mesa-dev \
+    libgl1-mesa-glx \
+    libglew-dev \
+    libopengl0 \
+    libosmesa6 \
+    libosmesa6-dev
 
 ###############################################################################
 
@@ -100,8 +104,9 @@ ENV PYTHONPATH="${USER_HOME}/MobileSAM/MobileSAMv2:${PYTHONPATH:-}"
 #### Setup Repo ####
 
 WORKDIR $USER_HOME
-RUN git clone https://github.com/maxdoesch/td3_bc.git && \
+RUN git clone https://github.com/maxdoesch/td3_bc.git -b feat-test-integrating-ftd && \
     cd td3_bc && \
-    uv sync --all-extras
+    uv sync --all-extras && \
+    uv pip install PyOpenGL_accelerate
 
 ###############################################################################

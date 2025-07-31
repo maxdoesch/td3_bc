@@ -1472,7 +1472,7 @@ wheels = [
 [[package]]
 name = "mobile-sam"
 version = "1.0"
-source = { directory = "../MobileSAM" }
+source = { editable = "../MobileSAM" }
 
 [package.optional-dependencies]
 all = [
@@ -3059,7 +3059,7 @@ requires-dist = [
     { name = "gymnasium", extras = ["classic-control", "mujoco"], specifier = ">=1.1.1" },
     { name = "imageio", extras = ["pyav"], marker = "extra == 'dm-control'", specifier = ">=2.37.0" },
     { name = "minari", extras = ["all"], specifier = ">=0.5.3" },
-    { name = "mobile-sam", extras = ["all"], marker = "extra == 'ftd'", directory = "../MobileSAM" },
+    { name = "mobile-sam", extras = ["all"], marker = "extra == 'ftd'", editable = "../MobileSAM" },
     { name = "onnxsim", marker = "extra == 'ftd'", specifier = ">=0.4.36" },
     { name = "sbx-rl", marker = "extra == 'expert-gen'", specifier = ">=0.20.0" },
     { name = "tensorboard", marker = "extra == 'expert-gen'", specifier = ">=2.19.0" },
