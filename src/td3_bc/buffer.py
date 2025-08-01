@@ -12,6 +12,7 @@ import td3_bc.utils as utils
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3):
     return (array - mean) / (std + eps)
 
+
 class ReplayBuffer:
     def __init__(
         self,
@@ -20,7 +21,7 @@ class ReplayBuffer:
         max_size: int = int(1e6),
         device: Optional[str] = None,
     ):
-        self.max_size = max_size 
+        self.max_size = max_size
         self.ptr = 0
         self.size = 0
 
@@ -32,7 +33,9 @@ class ReplayBuffer:
         self.action_dim = action_dim
 
         self.is_image_obs = len(self.obs_shape) in {2, 3}
-        self.max_size = int(1e5) if self.is_image_obs else max_size #hack to avoid MemoryError with large image buffers
+        self.max_size = (
+            int(1e5) if self.is_image_obs else max_size
+        )  # hack to avoid MemoryError with large image buffers
 
         self.obs = np.zeros((self.max_size,) + self.obs_shape, dtype=np.uint8 if self.is_image_obs else np.float32)
         self.next_obs = np.zeros((self.max_size,) + self.obs_shape, dtype=np.uint8 if self.is_image_obs else np.float32)
@@ -40,8 +43,12 @@ class ReplayBuffer:
         self.reward = np.zeros((self.max_size, 1), dtype=np.float32)
         self.not_done = np.zeros((self.max_size, 1), dtype=np.float32)
 
-        self.obs_mean = np.array(0., dtype=np.float32) if self.is_image_obs else np.zeros(self.obs_shape, dtype=np.float32)
-        self.obs_std = np.array(255., dtype=np.float32) if self.is_image_obs else np.ones(self.obs_shape, dtype=np.float32)
+        self.obs_mean = (
+            np.array(0.0, dtype=np.float32) if self.is_image_obs else np.zeros(self.obs_shape, dtype=np.float32)
+        )
+        self.obs_std = (
+            np.array(255.0, dtype=np.float32) if self.is_image_obs else np.ones(self.obs_shape, dtype=np.float32)
+        )
 
     def add(self, obs: np.ndarray, action: np.ndarray, next_obs: np.ndarray, reward: np.ndarray, done: np.ndarray):
         """
@@ -236,7 +243,7 @@ class ReplayBuffer:
 
         if self.is_image_obs:
             obs_mean = np.array(0, dtype=np.float32)
-            obs_std = np.array(255., dtype=np.float32)
+            obs_std = np.array(255.0, dtype=np.float32)
         else:
             obs_mean = np.mean(self.obs[: self.size], axis=0, keepdims=False)
             obs_std = np.std(self.obs[: self.size], axis=0, keepdims=False)
