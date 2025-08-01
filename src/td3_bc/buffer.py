@@ -216,9 +216,11 @@ class ReplayBuffer:
                 stats = json.load(f)
             obs_mean = np.array(stats["obs_mean"])
             obs_std = np.array(stats["obs_std"])
-            self.set_dataset_statistics(np.array(stats["obs_mean"]), np.array(stats["obs_std"]))
+            self.set_dataset_statistics(obs_mean, obs_std)
         else:
             logging.warning(f"Dataset statistics not found at {stats_path}. Replay buffer will not be normalized.")
+            obs_mean = self.obs_mean
+            obs_std = self.obs_std
 
         return obs_mean, obs_std
 
