@@ -7,7 +7,7 @@ import minari
 import random
 from typing import Dict, Optional, Union, List, Tuple
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import draccus
 import gymnasium as gym
@@ -17,10 +17,10 @@ from tqdm import tqdm
 import wandb
 
 from td3_bc.buffer import ReplayBuffer
-import td3_bc.td3_bc as td3_bc
-import td3_bc.td3_bc_ftd as td3_bc_ftd
+import td3_bc.algorithms.td3_bc_vanilla as td3_bc
+import td3_bc.algorithms.td3_bc_ftd as td3_bc_ftd
 from td3_bc.evaluator import Evaluator
-from td3_bc.factory import get_td3_bc_agent
+import td3_bc.algorithms as algorithms
 
 
 @dataclass
@@ -38,21 +38,21 @@ class ModeConfig(draccus.ChoiceRegistry):
 @dataclass
 class PretrainConfig(ModeConfig):
     name: str = "pretrain"
-    td3_config: td3_bc.TD3BC_Config = td3_bc.TD3BC_Config()
+    td3_config: td3_bc.TD3BC_Config = field(default_factory=td3_bc.TD3BC_Config)
 
 
 @ModeConfig.register_subclass("refine")
 @dataclass
 class RefineConfig(ModeConfig):
     name: str = "refine"
-    td3_config: td3_bc.TD3BC_Refine_Config = td3_bc.TD3BC_Refine_Config()
+    td3_config: td3_bc.TD3BC_Refine_Config = field(default_factory=td3_bc.TD3BC_Refine_Config)
 
 
 @ModeConfig.register_subclass("online")
 @dataclass
 class OnlineConfig(ModeConfig):
     name: str = "online"
-    td3_config: td3_bc.TD3BC_Online_Config = td3_bc.TD3BC_Online_Config()
+    td3_config: td3_bc.TD3BC_Online_Config = field(default_factory=td3_bc.TD3BC_Online_Config)
 
     warmup_steps: int = 5000
     expl_noise: float = 0.1
@@ -62,7 +62,7 @@ class OnlineConfig(ModeConfig):
 @dataclass
 class PretrainFTDConfig(ModeConfig):
     name: str = "pretrain_ftd"
-    td3_config: td3_bc_ftd.TD3BC_FTD_Config = td3_bc_ftd.TD3BC_FTD_Config()
+    td3_config: td3_bc_ftd.TD3BC_FTD_Config = field(default_factory=td3_bc_ftd.TD3BC_FTD_Config)
 
 
 @dataclass
@@ -222,7 +222,7 @@ class Trainer(ABC):
         self.envs.reset(seed=seed)
 
     def _load_agent(self, pretrain_dir: str, pretrain_checkpoint: int, seed: int):
-        self.agent = get_td3_bc_agent(
+        self.agent = algorithms.get_td3_bc_agent(
             obs_shape=self.obs_shape,
             action_dim=self.action_dim,
             max_action=self.max_action,

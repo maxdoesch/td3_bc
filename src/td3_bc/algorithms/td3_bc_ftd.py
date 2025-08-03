@@ -8,11 +8,11 @@ from typing import Optional
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 import td3_bc.policies as policies
-import td3_bc.ftd.auxiliary_pred as aux
-from td3_bc.td3_bc import TD3BC_Base, TD3BC_Base_Config
+from .td3_bc import TD3BC_Base, TD3BC_Base_Config
 
 
 @dataclass
@@ -32,6 +32,71 @@ class TD3BC_FTD_Config(TD3BC_Base_Config):
     predictors_warmup_steps: int = 10_000  # Number of warmup steps before updating auxiliary predictors
 
     log_img_freq: int = 500  # Frequency of logging images to wandb
+
+
+def weight_init(m):
+    """Custom weight init for Conv2D and Linear layers"""
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        if hasattr(m.bias, "data"):
+            m.bias.data.fill_(0.0)
+    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
+        assert m.weight.size(2) == m.weight.size(3)
+        m.weight.data.fill_(0.0)
+        if hasattr(m.bias, "data"):
+            m.bias.data.fill_(0.0)
+        mid = m.weight.size(2) // 2
+        gain = nn.init.calculate_gain("relu")
+        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
+
+
+class RewardPredictor(nn.Module):
+    def __init__(self, encoder, action_dim, hidden_dim):
+        super().__init__()
+
+        self.encoder = encoder
+        self.mlp = nn.Sequential(
+            nn.Linear(self.encoder.out_dim + action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+        self.mlp.apply(weight_init)
+
+    def forward(self, x, action):
+        x = self.encoder(x)
+        x = torch.cat([x, action], dim=1)
+        x = self.mlp(x)
+
+        return x
+
+
+class InverseDynamicPredictor(nn.Module):
+    def __init__(self, encoder, action_dim, hidden_dim):
+        super().__init__()
+
+        self.encoder = encoder
+        self.mlp = nn.Sequential(
+            nn.Linear(self.encoder.out_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim),
+        )
+
+        self.mlp.apply(weight_init)
+
+    def forward(self, x, next_x):
+        x = self.encoder(x)
+        next_x = self.encoder(next_x)
+
+        x = torch.cat((x, next_x), dim=1)
+        x = self.mlp(x)
+
+        return x
 
 
 class TD3BC_FTD(TD3BC_Base):
@@ -82,11 +147,11 @@ class TD3BC_FTD(TD3BC_Base):
 
         # === Auxiliary Predictors ===
 
-        self.reward_predictor = aux.RewardPredictor(self.critic.encoder, action_dim, cfg.predictor_hidden_dim).to(
+        self.reward_predictor = RewardPredictor(self.critic.encoder, action_dim, cfg.predictor_hidden_dim).to(
             self.device
         )
 
-        self.inverse_dynamic_predictor = aux.InverseDynamicPredictor(
+        self.inverse_dynamic_predictor = InverseDynamicPredictor(
             self.critic.encoder, action_dim, cfg.predictor_hidden_dim
         ).to(self.device)
 

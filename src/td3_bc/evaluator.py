@@ -7,7 +7,7 @@ import gymnasium as gym
 from gymnasium.vector import VectorEnv
 from abc import ABC, abstractmethod
 
-import td3_bc.td3_bc as td3_bc
+import td3_bc.algorithms.td3_bc as td3_bc
 
 
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3) -> np.ndarray:
