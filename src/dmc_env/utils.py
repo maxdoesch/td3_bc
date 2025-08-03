@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 from typing import Tuple
 
+
 def resize_stacked_images(stacked_image: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
     if stacked_image.ndim != 3:
         raise ValueError("Expected 3D input array")
