@@ -10,9 +10,9 @@ from gymnasium.wrappers import NormalizeObservation
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from minari import DataCollector, list_local_datasets
 
-import dmc_envs  # noqa: F401
-from td3_bc.segmentation import MobileSAMV2Config
-from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation
+import dmc_env  # noqa: F401
+from dmc_env.segmentation import MobileSAMV2Config
+from dmc_env.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation
 import td3_bc.utils as utils
 
 # Metadata

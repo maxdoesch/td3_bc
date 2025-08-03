@@ -1,19 +1,19 @@
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 import numpy as np
 import torch
 import gymnasium as gym
 
-from td3_bc.segmentation import MobileSAMV2, MobileSAMV2Config
-from td3_bc.utils import resize_stacked_images
+from .segmentation import MobileSAMV2, MobileSAMV2Config
+from .utils import resize_stacked_images
 
 
 @dataclass
 class FTDObservationWrapperConfig:
     # MobileSAMv2 parameters
-    sam_config: MobileSAMV2Config = MobileSAMV2Config()
+    sam_config: MobileSAMV2Config = field(default_factory=MobileSAMV2Config)
 
     # FTD parameters
     num_regions: int = 10  # Number of segmented regions

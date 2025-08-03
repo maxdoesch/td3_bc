@@ -1,10 +1,12 @@
 import draccus
 from functools import partial
 import gymnasium as gym
+
 from td3_bc.trainer import get_trainer, TrainerConfig
-import dmc_envs  # noqa: F401
-from td3_bc.segmentation import MobileSAMV2Config
-from td3_bc.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation
+
+import dmc_env  # noqa: F401
+from dmc_env.segmentation import MobileSAMV2Config
+from dmc_env.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation
 
 
 def make_vec(env_id: str):

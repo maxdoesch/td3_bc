@@ -10,7 +10,7 @@ from dm_control import suite
 from dm_control.utils import io as resources
 from dm_control.suite import common
 
-from dmc_envs.utils import replace_green_bg, interpolate_bg
+from .utils import replace_green_bg, interpolate_bg
 
 
 _DMC_ENVS_DIR = os.path.dirname(__file__)

@@ -37,7 +37,7 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = [
     "src/td3_bc",
-    "src/dmc_envs",
+    "src/dmc_env",
     "src/expert_gen",
 ]
 

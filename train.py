@@ -1,7 +1,7 @@
 import draccus
 
 from td3_bc.trainer import get_trainer, TrainerConfig
-import dmc_envs  # noqa: F401
+import dmc_env  # noqa: F401
 
 
 @draccus.wrap()

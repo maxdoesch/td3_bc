@@ -9,7 +9,7 @@ from stable_baselines3.common.callbacks import CallbackList, EvalCallback, Check
 from wandb.integration.sb3 import WandbCallback
 
 from expert_gen.hyperparameter import HYPERPARAMETERS
-import dmc_envs  # noqa: F401
+import dmc_env  # noqa: F401
 
 
 class VecNormalizeCallback(BaseCallback):

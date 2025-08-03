@@ -1,5 +1,47 @@
 import numpy as np
 from PIL import Image
+from typing import Tuple
+
+def resize_stacked_images(stacked_image: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
+    if stacked_image.ndim != 3:
+        raise ValueError("Expected 3D input array")
+
+    new_height, new_width = shape
+
+    if stacked_image.shape[2] % 3 == 0:
+        # Likely HWC
+        H, W, C = stacked_image.shape
+        num_imgs = C // 3
+        scale_y = new_height / H
+        scale_x = new_width / W
+
+        out = np.zeros((new_height, new_width, C), dtype=stacked_image.dtype)
+
+        for i in range(num_imgs):
+            img = stacked_image[:, :, i * 3 : (i + 1) * 3]
+            y_idx = np.clip((np.arange(new_height) / scale_y).astype(int), 0, H - 1)
+            x_idx = np.clip((np.arange(new_width) / scale_x).astype(int), 0, W - 1)
+            out[:, :, i * 3 : (i + 1) * 3] = img[y_idx[:, None], x_idx[None, :]]
+        return out
+
+    elif stacked_image.shape[0] % 3 == 0:
+        # If first dimension is divisible by 3, assume CHW stacked RGB images
+        C, H, W = stacked_image.shape
+        num_imgs = C // 3
+        scale_y = new_height / H
+        scale_x = new_width / W
+
+        out = np.zeros((C, new_height, new_width), dtype=stacked_image.dtype)
+
+        for i in range(num_imgs):
+            img = stacked_image[i * 3 : (i + 1) * 3, :, :]
+            y_idx = np.clip((np.arange(new_height) / scale_y).astype(int), 0, H - 1)
+            x_idx = np.clip((np.arange(new_width) / scale_x).astype(int), 0, W - 1)
+            out[i * 3 : (i + 1) * 3, :, :] = img[:, y_idx[:, None], x_idx[None, :]]
+        return out
+
+    else:
+        raise ValueError("Input shape doesn't match expected CHW or HWC stacked RGB format.")
 
 
 def rgb_to_hsv_np(rgb: np.ndarray) -> np.ndarray:
