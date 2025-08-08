@@ -78,7 +78,7 @@ class TrainerConfig:
     debug: bool = False  # do not log to wandb
     resume: bool = False  # resume training
 
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     seeds: Union[List, int] = 0
     n_seeds: int = 1

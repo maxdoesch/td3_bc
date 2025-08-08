@@ -55,7 +55,7 @@ class TD3BC_Base(BaseAgent):
             cfg = TD3BC_Base_Config()
 
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.device = device
 
         obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape

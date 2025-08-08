@@ -142,7 +142,7 @@ if __name__ == "__main__":
     cfg = TD3BC_Config()
     agent = TD3BC(obs_shape, action_dim, max_action, cfg)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     batch = {
         "obs": torch.randn(32, 3).to(device),

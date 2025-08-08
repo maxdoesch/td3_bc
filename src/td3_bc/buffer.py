@@ -26,7 +26,7 @@ class ReplayBuffer:
         self.size = 0
 
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.device = device
 
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape

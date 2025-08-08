@@ -57,7 +57,7 @@ class MobileSAMV2:
 
         # Create model and predictor
         self.mobilesamv2, self.obj_aware_model = self.create_model()
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.mobilesamv2.to(device=self.device)
         self.mobilesamv2.eval()
         self.predictor = SamPredictor(self.mobilesamv2)

@@ -8,9 +8,9 @@ from typing import Union
 
 from td3_bc.trainer import TrainerConfig
 from td3_bc.evaluator import Evaluator
-import td3_bc.td3_bc as td3_bc
+import td3_bc.algorithms as algorithms
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def get_normalized_score(score: np.ndarray, ref_min_score: float, ref_max_score: float) -> np.ndarray:
@@ -64,7 +64,7 @@ def main(cfg: EvalConfig):
         np.random.seed(seed)
         envs.reset(seed=seed)
 
-        agent = td3_bc.get_td3_bc_agent(
+        agent = algorithms.get_td3_bc_agent(
             obs_shape=obs_shape,
             action_dim=action_dim,
             max_action=max_action,

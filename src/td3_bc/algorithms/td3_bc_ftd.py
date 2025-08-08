@@ -3,7 +3,7 @@ import copy
 import time
 import wandb
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -17,7 +17,7 @@ from .td3_bc import TD3BC_Base, TD3BC_Base_Config
 
 @dataclass
 class TD3BC_FTD_Config(TD3BC_Base_Config):
-    policy_config: policies.PolicyConfig = policies.FtdPolicyConfig()
+    policy_config: policies.PolicyConfig = field(default_factory=policies.FtdPolicyConfig)
 
     predictor_hidden_dim: int = 1024  # Hidden dimension for auxiliary predictors
     reward_factor: float = 1.0  # Scaling factor for the reward prediction loss
@@ -112,7 +112,7 @@ class TD3BC_FTD(TD3BC_Base):
             cfg = TD3BC_FTD_Config()
 
         if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.device = device
 
         self.total_it = 0
