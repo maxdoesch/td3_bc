@@ -9,7 +9,7 @@ from typing import Dict, Tuple, Optional, Union
 import td3_bc.utils as utils
 
 
-def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3):
+def normalize(array: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, eps: float = 1e-3):
     return (array - mean) / (std + eps)
 
 
@@ -37,18 +37,17 @@ class ReplayBuffer:
             int(1e5) if self.is_image_obs else max_size
         )  # hack to avoid MemoryError with large image buffers
 
-        self.obs = np.zeros((self.max_size,) + self.obs_shape, dtype=np.uint8 if self.is_image_obs else np.float32)
-        self.next_obs = np.zeros((self.max_size,) + self.obs_shape, dtype=np.uint8 if self.is_image_obs else np.float32)
-        self.action = np.zeros((self.max_size, action_dim), dtype=np.float32)
-        self.reward = np.zeros((self.max_size, 1), dtype=np.float32)
-        self.not_done = np.zeros((self.max_size, 1), dtype=np.float32)
+        obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
+        self.obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device='cpu')
+        self.next_obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device='cpu')
+        self.action = torch.zeros((self.max_size, action_dim), dtype=torch.float32, device='cpu')
+        self.reward = torch.zeros((self.max_size, 1), dtype=torch.float32, device='cpu')
+        self.not_done = torch.zeros((self.max_size, 1), dtype=torch.float32, device='cpu')
 
-        self.obs_mean = (
-            np.array(0.0, dtype=np.float32) if self.is_image_obs else np.zeros(self.obs_shape, dtype=np.float32)
-        )
-        self.obs_std = (
-            np.array(255.0, dtype=np.float32) if self.is_image_obs else np.ones(self.obs_shape, dtype=np.float32)
-        )
+        self.obs_mean = torch.tensor(0.0, dtype=torch.float32, device=self.device) if self.is_image_obs else torch.zeros(self.obs_shape, dtype=torch.float32, device=self.device)
+        self.obs_std = torch.tensor(255.0, dtype=torch.float32, device=self.device) if self.is_image_obs else torch.ones(self.obs_shape, dtype=torch.float32, device=self.device)
+
+        self._staging = None  # for async H2D transfers
 
     def add(self, obs: np.ndarray, action: np.ndarray, next_obs: np.ndarray, reward: np.ndarray, done: np.ndarray):
         """
@@ -74,13 +73,14 @@ class ReplayBuffer:
 
         n_env = obs.shape[0]
 
-        indices = np.arange(self.ptr, self.ptr + n_env) % self.max_size
+        indices = torch.arange(self.ptr, self.ptr + n_env) % self.max_size
 
-        self.obs[indices] = obs
-        self.action[indices] = action
-        self.next_obs[indices] = next_obs
-        self.reward[indices] = reward
-        self.not_done[indices] = 1 - done
+        obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
+        self.obs[indices] = torch.tensor(obs, dtype=obs_dtype)
+        self.next_obs[indices] = torch.tensor(next_obs, dtype=obs_dtype)
+        self.action[indices] = torch.tensor(action, dtype=torch.float32)
+        self.reward[indices] = torch.tensor(reward, dtype=torch.float32)
+        self.not_done[indices] = 1 - torch.tensor(done, dtype=torch.float32)
 
         self.ptr = (self.ptr + n_env) % self.max_size
         self.size = min(self.size + n_env, self.max_size)
@@ -100,39 +100,51 @@ class ReplayBuffer:
                 - "reward": Tensor of shape (batch_size) with rewards received.
                 - "not_done": Tensor of shape (batch_size) indicating whether the episode has not ended.
         """
-        idx = np.random.randint(0, self.size, size=batch_size)
+        idx = torch.randint(0, self.size, size=(batch_size,))
 
-        obs_norm = normalize(self.obs[idx], self.obs_mean, self.obs_std)
-        next_obs_norm = normalize(self.next_obs[idx], self.obs_mean, self.obs_std)
+        obs_cpu = self.obs.index_select(0, idx)        # uint8 on CPU
+        next_obs_cpu = self.next_obs.index_select(0, idx)
+        act_cpu = self.action.index_select(0, idx)
+        rew_cpu = self.reward.index_select(0, idx)
+        nd_cpu = self.not_done.index_select(0, idx)
+
+        if self._staging is None:
+            obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
+            self._staging = {
+                "obs":      torch.empty((batch_size, *self.obs_shape), dtype=obs_dtype, pin_memory=True),
+                "next_obs": torch.empty((batch_size, *self.obs_shape), dtype=obs_dtype, pin_memory=True),
+                "action":   torch.empty((batch_size, self.action_dim), dtype=torch.float32, pin_memory=True),
+                "reward":   torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True),
+                "not_done": torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True),
+            }
+
+        self._staging["obs"].copy_(obs_cpu, non_blocking=False)
+        self._staging["next_obs"].copy_(next_obs_cpu, non_blocking=False)
+        self._staging["action"].copy_(act_cpu, non_blocking=False)
+        self._staging["reward"].copy_(rew_cpu, non_blocking=False)
+        self._staging["not_done"].copy_(nd_cpu, non_blocking=False)
+
+        # Async H2D; cast images to float on GPU
+        obs = self._staging["obs"].to(self.device, non_blocking=True)
+        next_obs = self._staging["next_obs"].to(self.device, non_blocking=True)
+        if self.is_image_obs:
+            obs = obs.float()
+            next_obs = next_obs.float()
+
+        action = self._staging["action"].to(self.device, non_blocking=True)
+        reward = self._staging["reward"].to(self.device, non_blocking=True)
+        not_done = self._staging["not_done"].to(self.device, non_blocking=True)
+
+        obs_norm = normalize(obs, self.obs_mean, self.obs_std)
+        next_obs_norm = normalize(next_obs, self.obs_mean, self.obs_std)
 
         return {
-            "obs": torch.tensor(obs_norm, dtype=torch.float32).to(self.device),
-            "action": torch.tensor(self.action[idx], dtype=torch.float32).to(self.device),
-            "next_obs": torch.tensor(next_obs_norm, dtype=torch.float32).to(self.device),
-            "reward": torch.tensor(self.reward[idx], dtype=torch.float32).to(self.device),
-            "not_done": torch.tensor(self.not_done[idx], dtype=torch.float32).to(self.device),
+            "obs": obs_norm,
+            "action": action,
+            "next_obs": next_obs_norm,
+            "reward": reward,
+            "not_done": not_done,
         }
-
-    #    def convert_dict(self, dict_dataset):
-    #        """
-    #        Populate the replay buffer with transitions from a dictionary dataset.
-    #        """
-    #        for episode in range(len(dict_dataset["obs"])):
-    #            transition = {
-    #                "obs": dict_dataset["obs"][episode],
-    #                "action": dict_dataset["acts"][episode],
-    #                "next_obs": dict_dataset["next_obs"][episode],
-    #                "reward": dict_dataset["rews"][episode],
-    #                "done": dict_dataset["dones"][episode],
-    #            }
-    #
-    #            self.add(**transition)
-    #
-    #        self.obs = self.obs[: self.size]
-    #        self.action = self.action[: self.size]
-    #        self.reward = self.reward[: self.size]
-    #        self.next_obs = self.next_obs[: self.size]
-    #        self.not_done = self.not_done[: self.size]
 
     def convert_dict(self, dict_dataset):
         """
@@ -201,8 +213,8 @@ class ReplayBuffer:
             stats_path = os.path.join(stats_path, "dataset_statistics.json")
 
         stats = {
-            "obs_mean": self.obs_mean.tolist(),
-            "obs_std": self.obs_std.tolist(),
+            "obs_mean": self.obs_mean.cpu().tolist(),
+            "obs_std": self.obs_std.cpu().tolist(),
         }
         with open(stats_path, "w") as f:
             json.dump(stats, f, indent=4)
@@ -226,8 +238,8 @@ class ReplayBuffer:
             self.set_dataset_statistics(obs_mean, obs_std)
         else:
             logging.warning(f"Dataset statistics not found at {stats_path}. Replay buffer will not be normalized.")
-            obs_mean = self.obs_mean
-            obs_std = self.obs_std
+            obs_mean = self.obs_mean.cpu().numpy()
+            obs_std = self.obs_std.cpu().numpy()
 
         return obs_mean, obs_std
 
@@ -242,13 +254,13 @@ class ReplayBuffer:
         """
 
         if self.is_image_obs:
-            obs_mean = np.array(0, dtype=np.float32)
-            obs_std = np.array(255.0, dtype=np.float32)
+            obs_mean = torch.tensor(0, dtype=torch.float32)
+            obs_std = torch.tensor(255.0, dtype=torch.float32)
         else:
-            obs_mean = np.mean(self.obs[: self.size], axis=0, keepdims=False)
-            obs_std = np.std(self.obs[: self.size], axis=0, keepdims=False)
+            obs_mean = torch.mean(self.obs[: self.size], axis=0, keepdims=False)
+            obs_std = torch.std(self.obs[: self.size], axis=0, keepdims=False)
 
-        return obs_mean, obs_std
+        return obs_mean.numpy(), obs_std.numpy()
 
     def set_dataset_statistics(self, obs_mean: np.ndarray, obs_std: np.ndarray):
         """
@@ -258,8 +270,8 @@ class ReplayBuffer:
             obs_mean (np.ndarray): The mean to use for normalization.
             obs_std (np.ndarray): The standard deviation to use for normalization.
         """
-        self.obs_mean = obs_mean
-        self.obs_std = obs_std
+        self.obs_mean = torch.tensor(obs_mean, dtype=torch.float32, device=self.device)
+        self.obs_std = torch.tensor(obs_std, dtype=torch.float32, device=self.device)
 
     def get_dataset_statistics(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -270,7 +282,7 @@ class ReplayBuffer:
                 - obs_mean (np.ndarray): The mean of the observations.
                 - obs_std (np.ndarray): The standard deviation of the observations.
         """
-        return self.obs_mean, self.obs_std
+        return self.obs_mean.cpu().numpy(), self.obs_std.cpu().numpy()
 
 
 if __name__ == "__main__":
@@ -337,5 +349,3 @@ if __name__ == "__main__":
 
     mean, std = buffer.compute_dataset_statistics()
     buffer.set_dataset_statistics(mean, std)
-
-    print("Mean and std shapes:", mean.shape, std.shape)
