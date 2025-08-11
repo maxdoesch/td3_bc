@@ -313,7 +313,7 @@ class TD3BC_FTD(TD3BC_Base):
                 )
                 metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
 
-        if self.total_it % self.log_img_freq == 0:
+        if self.log_img_freq != 0 and self.total_it % self.log_img_freq == 0:
             metrics["train/raw_images"] = wandb.Image(batch["obs"][0][-3:])
             metrics["train/ftd_images"] = wandb.Image(self.select_image(batch["obs"][0])[1])
 

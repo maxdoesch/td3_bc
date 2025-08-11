@@ -95,6 +95,7 @@ class TrainerConfig:
 
     env_name: Optional[str] = None
     num_envs: Optional[int] = 1
+    env_kwargs: Dict = field(default_factory=dict)
 
     @property
     def dataset_statistics_path(self) -> str:
@@ -182,7 +183,9 @@ class Trainer(ABC):
         if envs:
             self.envs = envs
         elif cfg.env_name:
-            self.envs = gym.make_vec(self.cfg.env_name, num_envs=self.cfg.num_envs, vectorization_mode="sync")
+            self.envs = gym.make_vec(
+                self.cfg.env_name, num_envs=self.cfg.num_envs, vectorization_mode="sync", **self.cfg.env_kwargs
+            )
         else:
             raise ValueError("No environment specified.")
 

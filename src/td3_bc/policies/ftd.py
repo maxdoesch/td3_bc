@@ -22,6 +22,7 @@ class FtdPolicyConfig(PolicyConfig):
     projection_dim: int = (
         100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
     )
+    skip_attention_selector: bool = False  # skip attention selector layers (Debugging feature)
 
 
 def _get_out_shape(in_shape, layers, device="cpu"):
@@ -210,15 +211,19 @@ class SharedFTDLayers(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        self.selector_layers = ImageAttentionSelectorLayers(
-            obs_shape,
-            cfg.num_regions,
-            cfg.num_channels,
-            cfg.num_stack,
-            cfg.num_selector_layers,
-            cfg.num_filters,
-            cfg.embed_dim,
-            cfg.num_attention_heads,
+        self.selector_layers = (
+            ImageAttentionSelectorLayers(
+                obs_shape,
+                cfg.num_regions,
+                cfg.num_channels,
+                cfg.num_stack,
+                cfg.num_selector_layers,
+                cfg.num_filters,
+                cfg.embed_dim,
+                cfg.num_attention_heads,
+            )
+            if not cfg.skip_attention_selector
+            else nn.Identity()
         )
 
         self.selector_cnn = SelectorCNN(

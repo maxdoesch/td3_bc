@@ -80,15 +80,15 @@ def generate_expert_dataset(
 
     env_kwargs = {}
     env_kwargs["channels_first"] = gen_segmentation
+    env_kwargs["height"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
+    env_kwargs["width"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
     if gen_segmentation:
-        env_kwargs['is_train'] = True
+        env_kwargs["is_train"] = True
 
     # Build env
     env = gym.make(
         env_id,
         obs_type="pixels",
-        height=RAW_IMG_RESOLUTION,
-        width=RAW_IMG_RESOLUTION,
         **env_kwargs,
     )
 
