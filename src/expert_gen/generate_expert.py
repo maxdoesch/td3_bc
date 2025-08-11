@@ -78,14 +78,18 @@ def generate_expert_dataset(
     checkpoint_path = os.path.join(checkpoints_dir, f"ppo_model_{checkpoint}_steps.zip")
     vecnorm_path = os.path.join(expert_path, "vecnormalize_checkpoints", f"vecnormalize_step_{checkpoint}.pkl")
 
+    env_kwargs = {}
+    env_kwargs["channels_first"] = gen_segmentation
+    if gen_segmentation:
+        env_kwargs['is_train'] = True
+
     # Build env
     env = gym.make(
         env_id,
         obs_type="pixels",
         height=RAW_IMG_RESOLUTION,
         width=RAW_IMG_RESOLUTION,
-        channels_first=True if gen_segmentation else False,
-        is_train=True,
+        **env_kwargs,
     )
 
     if gen_segmentation:

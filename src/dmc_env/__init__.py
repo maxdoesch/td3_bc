@@ -23,14 +23,17 @@ def make(
     environment_kwargs: Optional[Dict] = None,
     time_limit: Optional[float] = None,
     channels_first: bool = True,
-    disctracting_control: bool = False,
+    env_type: str = "dmc",  # 'dmc', 'dmc_background', 'dmc_distraction'
 ):
     assert obs_type in ["state", "pixels", "both"], "obs_type must be one of: state, pixels, both"
 
-    if disctracting_control:
-        env_id = "dmc_distraction_%s_%s_%s-v1" % (domain_name, task_name, seed)
-    else:
-        env_id = "dmc_%s_%s_%s-v1" % (domain_name, task_name, seed)
+    env_id = "%s_%s_%s_%s-v1" % (env_type, domain_name, task_name, seed)
+
+    env_type_entry_point_map = {
+        "dmc": "dmc_env.dmc2gym:DMCWrapper",
+        "dmc_background": "dmc_env.dmc2gym:DMCWrapperBackground",
+        "dmc_distraction": "dmc_env.dmc2gym:DistractionDMCWrapper",
+    }
 
     if obs_type in ["pixels", "both"]:
         assert not visualize_reward, "cannot use visualize reward when learning from pixels"
@@ -46,9 +49,7 @@ def make(
             task_kwargs["time_limit"] = time_limit
         register(
             id=env_id,
-            entry_point="dmc_env.dmc2gym:DistractionDMCWrapper"
-            if disctracting_control
-            else "dmc_env.dmc2gym:DMCWrapper",
+            entry_point=env_type_entry_point_map[env_type],
             kwargs=dict(
                 domain_name=domain_name,
                 task_name=task_name,
@@ -67,35 +68,20 @@ def make(
 
 
 for domain_name, task_name in suite._get_tasks(tag=None):
-    make(
-        domain_name=domain_name,
-        task_name=task_name,
-        seed=1,
-        visualize_reward=False,
-        obs_type=OBS_TYPE,
-        height=84,
-        width=84,
-        camera_id=0,
-        frame_skip=1,
-        episode_length=1000,
-        environment_kwargs=None,
-        time_limit=None,
-        channels_first=False,
-        disctracting_control=False,
-    )
-    make(
-        domain_name=domain_name,
-        task_name=task_name,
-        seed=1,
-        visualize_reward=False,
-        obs_type=OBS_TYPE,
-        height=84,
-        width=84,
-        camera_id=0,
-        frame_skip=1,
-        episode_length=1000,
-        environment_kwargs=None,
-        time_limit=None,
-        channels_first=False,
-        disctracting_control=True,
-    )
+    for env_type in ["dmc", "dmc_background", "dmc_distraction"]:
+        make(
+            domain_name=domain_name,
+            task_name=task_name,
+            seed=1,
+            visualize_reward=False,
+            obs_type=OBS_TYPE,
+            height=84,
+            width=84,
+            camera_id=0,
+            frame_skip=1,
+            episode_length=1000,
+            environment_kwargs=None,
+            time_limit=None,
+            channels_first=False,
+            env_type=env_type,
+        )

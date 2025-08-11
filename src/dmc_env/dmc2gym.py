@@ -14,13 +14,6 @@ from .utils import replace_green_bg, interpolate_bg
 
 
 _DMC_ENVS_DIR = os.path.dirname(__file__)
-_FILENAMES = [
-    "./assets/materials.xml",
-    "./assets/skybox.xml",
-    "./assets/visual.xml",
-]
-
-ASSETS = {filename: resources.GetResource(os.path.join(_DMC_ENVS_DIR, filename)) for filename in _FILENAMES}
 
 
 def _spec_to_box(spec, dtype):
@@ -205,7 +198,57 @@ class DMCWrapper(Env):
         return self._env.physics.render(height=height, width=width, camera_id=camera_id)
 
 
-class DistractionDMCWrapper(DMCWrapper):
+# superclass to replace default background with green
+class DMCWrapperBackground(DMCWrapper):
+    def __init__(
+        self,
+        domain_name: str,
+        task_name: str,
+        task_kwargs: Optional[Dict] = {},
+        visualize_reward: bool = False,
+        obs_type: str = "state",
+        height: int = 84,
+        width: int = 84,
+        camera_id: int = 0,
+        frame_skip: int = 1,
+        environment_kwargs: Optional[Dict] = None,
+        channels_first: bool = True,
+        background_color: str = "black",  # green or black
+    ):
+        super().__init__(
+            domain_name=domain_name,
+            task_name=task_name,
+            task_kwargs=task_kwargs,
+            visualize_reward=visualize_reward,
+            obs_type=obs_type,
+            height=height,
+            width=width,
+            camera_id=camera_id,
+            frame_skip=frame_skip,
+            environment_kwargs=environment_kwargs,
+            channels_first=channels_first,
+        )
+
+        assert background_color in ["green", "black"], "background_color must be either 'green' or 'black'"
+
+        filenames = [
+            os.path.join(".", "assets", background_color, "materials.xml"),
+            os.path.join(".", "assets", background_color, "skybox.xml"),
+            os.path.join(".", "assets", background_color, "visual.xml"),
+        ]
+
+        assets = {filename: resources.GetResource(os.path.join(_DMC_ENVS_DIR, filename)) for filename in filenames}
+
+        xml_model_string = common.read_model(domain_name + ".xml").decode("utf-8")
+
+        to_replace = ["./common/skybox.xml", "./common/materials.xml", "./common/visual.xml"]
+        for replace, replacement in zip(to_replace, filenames):
+            xml_model_string = xml_model_string.replace(replace, replacement)
+
+        self._env.physics.reload_from_xml_string(xml_model_string, assets=assets)
+
+
+class DistractionDMCWrapper(DMCWrapperBackground):
     """
     A wrapper for dm_control environments that implements distraction by playing videos in the background.
     """
@@ -238,15 +281,8 @@ class DistractionDMCWrapper(DMCWrapper):
             frame_skip=frame_skip,
             environment_kwargs=environment_kwargs,
             channels_first=channels_first,
+            background_color="green",  # green background for distraction
         )
-
-        xml_model_string = common.read_model(domain_name + ".xml").decode("utf-8")
-
-        to_replace = ["./common/skybox.xml", "./common/materials.xml", "./common/visual.xml"]
-        for replace, replacement in zip(to_replace, _FILENAMES):
-            xml_model_string = xml_model_string.replace(replace, replacement)
-
-        self._env.physics.reload_from_xml_string(xml_model_string, assets=ASSETS)
 
         self._is_train = is_train
 
