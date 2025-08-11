@@ -38,14 +38,22 @@ class ReplayBuffer:
         )  # hack to avoid MemoryError with large image buffers
 
         obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
-        self.obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device='cpu')
-        self.next_obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device='cpu')
-        self.action = torch.zeros((self.max_size, action_dim), dtype=torch.float32, device='cpu')
-        self.reward = torch.zeros((self.max_size, 1), dtype=torch.float32, device='cpu')
-        self.not_done = torch.zeros((self.max_size, 1), dtype=torch.float32, device='cpu')
+        self.obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device="cpu")
+        self.next_obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device="cpu")
+        self.action = torch.zeros((self.max_size, action_dim), dtype=torch.float32, device="cpu")
+        self.reward = torch.zeros((self.max_size, 1), dtype=torch.float32, device="cpu")
+        self.not_done = torch.zeros((self.max_size, 1), dtype=torch.float32, device="cpu")
 
-        self.obs_mean = torch.tensor(0.0, dtype=torch.float32, device=self.device) if self.is_image_obs else torch.zeros(self.obs_shape, dtype=torch.float32, device=self.device)
-        self.obs_std = torch.tensor(255.0, dtype=torch.float32, device=self.device) if self.is_image_obs else torch.ones(self.obs_shape, dtype=torch.float32, device=self.device)
+        self.obs_mean = (
+            torch.tensor(0.0, dtype=torch.float32, device=self.device)
+            if self.is_image_obs
+            else torch.zeros(self.obs_shape, dtype=torch.float32, device=self.device)
+        )
+        self.obs_std = (
+            torch.tensor(255.0, dtype=torch.float32, device=self.device)
+            if self.is_image_obs
+            else torch.ones(self.obs_shape, dtype=torch.float32, device=self.device)
+        )
 
         self._staging = None  # for async H2D transfers
 
@@ -102,7 +110,7 @@ class ReplayBuffer:
         """
         idx = torch.randint(0, self.size, size=(batch_size,))
 
-        obs_cpu = self.obs.index_select(0, idx)        # uint8 on CPU
+        obs_cpu = self.obs.index_select(0, idx)  # uint8 on CPU
         next_obs_cpu = self.next_obs.index_select(0, idx)
         act_cpu = self.action.index_select(0, idx)
         rew_cpu = self.reward.index_select(0, idx)
@@ -111,10 +119,10 @@ class ReplayBuffer:
         if self._staging is None:
             obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
             self._staging = {
-                "obs":      torch.empty((batch_size, *self.obs_shape), dtype=obs_dtype, pin_memory=True),
+                "obs": torch.empty((batch_size, *self.obs_shape), dtype=obs_dtype, pin_memory=True),
                 "next_obs": torch.empty((batch_size, *self.obs_shape), dtype=obs_dtype, pin_memory=True),
-                "action":   torch.empty((batch_size, self.action_dim), dtype=torch.float32, pin_memory=True),
-                "reward":   torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True),
+                "action": torch.empty((batch_size, self.action_dim), dtype=torch.float32, pin_memory=True),
+                "reward": torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True),
                 "not_done": torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True),
             }
 

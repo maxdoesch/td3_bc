@@ -143,8 +143,6 @@ class TD3BC_FTD(TD3BC_Base):
         self.actor, self.critic = policies.get_policy(obs_shape, action_dim, max_action, self.device, cfg.policy_config)
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
 
-        self.complete_selector = self.critic.shared_layers.selector_layers.to(self.device)
-
         # === Auxiliary Predictors ===
 
         self.reward_predictor = RewardPredictor(self.critic.encoder, action_dim, cfg.predictor_hidden_dim).to(

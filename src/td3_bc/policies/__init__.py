@@ -77,7 +77,7 @@ def build_ftd_policy(
     device: str,
     cfg: FtdPolicyConfig,
 ) -> Tuple[BaseActor, BaseCritic]:
-    shared_layers = SharedFTDLayers(obs_shape, cfg)
+    shared_layers = SharedFTDLayers(obs_shape, cfg).to(device)
     actor = FTDActor(shared_layers, obs_shape, action_dim, max_action).to(device)
     critic = FTDCritic(shared_layers, obs_shape, action_dim).to(device)
     return actor, critic
