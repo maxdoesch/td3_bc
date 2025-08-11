@@ -104,7 +104,7 @@ ENV PYTHONPATH="${USER_HOME}/MobileSAM/MobileSAMv2:${PYTHONPATH:-}"
 #### Setup Repo ####
 
 WORKDIR $USER_HOME
-RUN git clone https://github.com/maxdoesch/td3_bc.git -b feat-test-integrating-ftd && \
+RUN git clone https://github.com/maxdoesch/td3_bc.git -b feat-integrating-ftd && \
     cd td3_bc && \
     uv sync --all-extras && \
     uv pip install PyOpenGL_accelerate
