@@ -1,28 +1,31 @@
 import torch
 import torch.nn as nn
-from dataclasses import dataclass
-from typing import Tuple, Union
+from dataclasses import dataclass, field
+from typing import Tuple, Union, Optional
 
 from .policy import PolicyConfig, BaseActor, BaseCritic
 from .mlp import MlpActor, MlpCritic
 
+@dataclass
+class ImageAttentionSelectorConfig:
+    conv_layers: int = 5               # Number of convolutional layers
+    conv_filters: int = 32              # Number of filters in conv layers
+    attention_embed_dim: int = 128      # Embedding dimension for attention
+    attention_heads: int = 4             # Number of attention heads
 
 @PolicyConfig.register_subclass("ftd")
 @dataclass
 class FtdPolicyConfig(PolicyConfig):
+    attn_selector_cfg: Optional[ImageAttentionSelectorConfig] = field(default_factory=ImageAttentionSelectorConfig)
+
     num_regions: int = 10  # Maximum number of segmented regions
     num_channels: int = 3  # Number of input channels
     num_stack: int = 1  # Number of frames stacked together as a single observation
-    num_selector_layers: int = 5  # Number of convolutional layers in the attention selector
-    num_filters: int = 32  # Number of filters in the convolutional layers
-    embed_dim: int = 128  # Dimension of the embedding space for attention
-    num_attention_heads: int = 4  # Number of attention heads
     num_shared_layers: int = 11  # Number of shared convolutional layers
     num_head_layers: int = 0  # Number of hidden layers in the head CNN
     projection_dim: int = (
         100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
     )
-    skip_attention_selector: bool = False  # skip attention selector layers (Debugging feature)
 
 
 def _get_out_shape(in_shape, layers, device="cpu"):
@@ -97,7 +100,7 @@ class SelectorCNN(nn.Module):
         super().__init__()
         assert len(obs_shape) == 3
         # assert region_num * in_channels * stack_num == obs_shape[0]
-        self.obs_shape = obs_shape
+        self.obs_shape = obs_shape # (C, H, W)
         self.in_channels = in_channels
         self.stack_num = stack_num
         self.num_filters = num_filters
@@ -139,41 +142,44 @@ class Encoder(nn.Module):
 
 
 class ImageAttentionSelectorLayers(nn.Module):
-    def __init__(self, obs_shape, region_num, in_channels, stack_num, num_layers, num_filters, embed_dim, num_heads):
+    def __init__(self, obs_shape: Tuple[int, int, int], region_num: int, in_channels: int, stack_num: int, cfg: ImageAttentionSelectorConfig):
         super().__init__()
 
-        # self.preprocess_layer = nn.Sequential(*[NormalizeImg()]) #@maxdoesch normalization is taken care of in trainer.py via buffer
-        self.layers = [nn.Conv2d(in_channels, num_filters, 3, stride=2, padding=1)]
-        self.shape = obs_shape[1:]
+        self.obs_shape = obs_shape
         self.region_num = region_num
         self.in_channels = in_channels
         self.stack_num = stack_num
-        self.embed_dim = embed_dim
-        self.num_heads = num_heads
 
-        self.current_image_size = obs_shape[1] // 2
-        for _ in range(1, num_layers):
+        self.conv_layers = cfg.conv_layers
+        self.conv_filters = cfg.conv_filters
+        self.attention_embed_dim = cfg.attention_embed_dim
+        self.attention_heads = cfg.attention_heads
+
+        reduced_img_height = obs_shape[1] // 2
+        self.layers = [nn.Conv2d(in_channels=in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2, padding=1)]
+        for _ in range(1, self.conv_layers):
             self.layers.append(nn.ReLU())
-            self.layers.append(nn.Conv2d(num_filters, num_filters, kernel_size=3, stride=1, padding=1))
+            self.layers.append(nn.Conv2d(in_channels=self.conv_filters, out_channels=self.conv_filters, kernel_size=3, stride=1, padding=1))
             self.layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
-            self.current_image_size = self.current_image_size // 2
+            reduced_img_height = reduced_img_height // 2
         self.layers.append(Flatten())
-        out_num = num_filters * self.current_image_size**2
-        self.layers.append(nn.Linear(out_num, embed_dim))
+
+        out_num = self.conv_filters * reduced_img_height**2
+        self.layers.append(nn.Linear(out_num, self.attention_embed_dim))
+
         self.layers = nn.Sequential(*self.layers)
         self.layers.apply(weight_init)
 
-        self.q = nn.Linear(embed_dim, num_heads * embed_dim)
-        self.k = nn.Linear(embed_dim, num_heads * embed_dim)
+        self.q = nn.Linear(self.attention_embed_dim, self.attention_heads * self.attention_embed_dim)
+        self.k = nn.Linear(self.attention_embed_dim, self.attention_heads * self.attention_embed_dim)
         # no 'v' network, we use the raw input images as the values
 
     def forward(self, x, return_logits=False, return_head_logits=False, return_all=False):
         # (batch_size, stack_num * (region_num + 1) * channels , height, width)
         # Last region is the whole frame
-        S, R, C, H, W = self.stack_num, self.region_num + 1, self.in_channels, self.shape[0], self.shape[1]
+        B, _, H, W = x.shape
+        S, R, C = self.stack_num, self.region_num + 1, self.in_channels
         x = x.reshape(-1, C, H, W)
-        B = x.shape[0] // S // R
-        # x = self.preprocess_layer(x)
 
         mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
         mask = torch.where(mask != 0, False, True)
@@ -181,12 +187,12 @@ class ImageAttentionSelectorLayers(nn.Module):
         tokens = self.layers(x).reshape(B * S, R, -1)
         tokens_frame = tokens[:, -1:, :]
         tokens_segment = tokens[:, :-1, :]
-        q = self.q(tokens_frame).reshape(B * S, 1, self.num_heads, self.embed_dim).transpose(-3, -2)
-        k = self.k(tokens_segment).reshape(B * S, R - 1, self.num_heads, self.embed_dim).transpose(-3, -2)
+        q = self.q(tokens_frame).reshape(B * S, 1, self.attention_heads, self.attention_embed_dim).transpose(-3, -2)
+        k = self.k(tokens_segment).reshape(B * S, R - 1, self.attention_heads, self.attention_embed_dim).transpose(-3, -2)
         v = x.reshape(B * S, R, C * H * W)[:, :-1, :]
 
         attention = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(k.shape[-1], dtype=torch.float32))
-        mask = torch.cat([torch.unsqueeze(mask, dim=1)] * self.num_heads, dim=1)
+        mask = torch.cat([torch.unsqueeze(mask, dim=1)] * self.attention_heads, dim=1)
         attention = attention.masked_fill_(mask, float("-inf"))
 
         multi_probs = torch.softmax(attention, dim=-1)
@@ -211,32 +217,25 @@ class SharedFTDLayers(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        self.selector_layers = (
-            ImageAttentionSelectorLayers(
-                obs_shape,
-                cfg.num_regions,
-                cfg.num_channels,
-                cfg.num_stack,
-                cfg.num_selector_layers,
-                cfg.num_filters,
-                cfg.embed_dim,
-                cfg.num_attention_heads,
-            )
-            if not cfg.skip_attention_selector
-            else nn.Identity()
-        )
+        self.image_attention_selector = ImageAttentionSelectorLayers(
+            obs_shape=obs_shape,
+            region_num=cfg.num_regions,
+            in_channels=cfg.num_channels,
+            stack_num=cfg.num_stack,
+            cfg=cfg.attn_selector_cfg
+        ) if cfg.attn_selector_cfg else nn.Identity()
 
         self.selector_cnn = SelectorCNN(
-            self.selector_layers,
+            self.image_attention_selector,
             obs_shape,
             cfg.num_regions,
             cfg.num_channels,
             cfg.num_stack,
             cfg.num_shared_layers,
-            cfg.num_filters,
+            cfg.attn_selector_cfg.conv_filters, # fix!!!!!!!!!
         )
 
-        self.head_cnn = HeadCNN(self.selector_cnn.out_shape, cfg.num_head_layers, cfg.num_filters)
+        self.head_cnn = HeadCNN(self.selector_cnn.out_shape, cfg.num_head_layers, cfg.attn_selector_cfg.conv_filters) # fix!!!!!!!!!
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         obs = self.selector_cnn(obs)

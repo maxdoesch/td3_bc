@@ -32,13 +32,17 @@ train_mode:
 
     policy_config:
       type: ftd
+
+      attn_selector_cfg:
+        conv_layers: 5
+        conv_filters: 32
+        attention_embed_dim: 128
+        attention_heads: 4
+
       num_regions: 10
       num_channels: 3
       num_stack: 1
-      num_selector_layers: 5
-      num_filters: 32
-      embed_dim: 128
-      num_attention_heads: 4
+
       num_shared_layers: 11
       num_head_layers: 0
       projection_dim: 100
