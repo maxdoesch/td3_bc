@@ -320,3 +320,15 @@ class TD3BC_FTD(TD3BC_Base):
         metrics["train/time"] = time.time() - start_time
 
         return metrics
+
+    def train(self):
+        self.inverse_dynamic_predictor.train()
+        self.reward_predictor.train()
+
+        return super().train()
+
+    def eval(self):
+        self.inverse_dynamic_predictor.eval()
+        self.reward_predictor.eval()
+
+        return super().eval()

@@ -71,6 +71,9 @@ class TD3BC_Base(BaseAgent):
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
 
+        self.actor.train()
+        self.critic.train()
+
         self.max_action = max_action
         self.discount = cfg.discount
         self.tau = cfg.tau
@@ -170,3 +173,11 @@ class TD3BC_Base(BaseAgent):
         self.actor_target = copy.deepcopy(self.actor)
 
         logging.debug(f"Model parameters loaded from: {file_path}.")
+
+    def train(self):
+        self.actor.train()
+        self.critic.train()
+
+    def eval(self):
+        self.actor.eval()
+        self.critic.eval()

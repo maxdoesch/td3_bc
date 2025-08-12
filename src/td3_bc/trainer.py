@@ -19,7 +19,7 @@ import wandb
 from td3_bc.buffer import ReplayBuffer
 import td3_bc.algorithms.td3_bc_vanilla as td3_bc
 import td3_bc.algorithms.td3_bc_ftd as td3_bc_ftd
-from td3_bc.evaluator import Evaluator
+from td3_bc.evaluator import Evaluator, Metric, RewardAndLengthMetric
 import td3_bc.algorithms as algorithms
 
 
@@ -176,7 +176,7 @@ def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float =
 
 
 class Trainer(ABC):
-    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None):
+    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None):
         self.cfg = cfg
         self.cfg.initialize_config()
 
@@ -196,6 +196,7 @@ class Trainer(ABC):
         self.agent: td3_bc.TD3BC_Base = None
 
         self.evaluator: Evaluator = None
+        self.eval_metric = eval_metric or RewardAndLengthMetric()
 
         self.buffer: ReplayBuffer = None
 
@@ -322,11 +323,11 @@ class Trainer(ABC):
             self.initialize_replay_buffer()
 
             self.evaluator = Evaluator(
-                self.envs,
-                self.agent,
+                envs=self.envs,
                 n_eval_episodes=self.cfg.eval_episodes,
                 dataset_statistics_path=self.cfg.dataset_statistics_path,
                 render=False,
+                metric=self.eval_metric,
             )
 
             for i in tqdm(
@@ -341,7 +342,10 @@ class Trainer(ABC):
                 run.log(metrics, step=i)
 
                 if (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0:
-                    eval_metrics = self.evaluator.evaluate()
+                    self.agent.eval()
+                    eval_metrics = self.evaluator.evaluate(self.agent)
+                    self.agent.train()
+                    
                     run.log(eval_metrics, step=i)
 
                 if (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1:
@@ -357,8 +361,8 @@ class Trainer(ABC):
 
 
 class OfflineTrainer(Trainer):
-    def __init__(self, cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None):
-        super().__init__(cfg, envs)
+    def __init__(self, cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None):
+        super().__init__(cfg=cfg, envs=envs, eval_metric=eval_metric)
 
         self.dataset = dataset
 
@@ -392,8 +396,8 @@ class OfflineTrainer(Trainer):
 
 
 class OnlineTrainer(Trainer):
-    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None):
-        super().__init__(cfg, envs)
+    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None):
+        super().__init__(cfg=cfg, envs=envs, eval_metric=eval_metric)
 
         self.obs = np.zeros((self.envs.num_envs, self.obs_shape))
         self.episode_starts = np.ones(self.envs.num_envs, dtype=np.bool)
@@ -460,7 +464,7 @@ class OnlineTrainer(Trainer):
         return self.buffer.sample(batch_size)
 
 
-def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None) -> Trainer:
+def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None) -> Trainer:
     trainer_map = {
         "pretrain": OfflineTrainer,
         "refine": OfflineTrainer,
@@ -470,9 +474,9 @@ def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Option
     if cfg.train_mode.name not in trainer_map:
         raise ValueError(f"Unknown training mode: {cfg.train_mode.name}")
     return (
-        trainer_map[cfg.train_mode.name](cfg, dataset, envs)
+        trainer_map[cfg.train_mode.name](cfg, dataset, envs, eval_metric)
         if cfg.train_mode.name != "online"
-        else trainer_map[cfg.train_mode.name](cfg, envs)
+        else trainer_map[cfg.train_mode.name](cfg, envs, eval_metric)
     )
 
 
