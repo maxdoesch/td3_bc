@@ -345,7 +345,7 @@ class Trainer(ABC):
                     self.agent.eval()
                     eval_metrics = self.evaluator.evaluate(self.agent)
                     self.agent.train()
-                    
+
                     run.log(eval_metrics, step=i)
 
                 if (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1:
@@ -361,7 +361,13 @@ class Trainer(ABC):
 
 
 class OfflineTrainer(Trainer):
-    def __init__(self, cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None):
+    def __init__(
+        self,
+        cfg: TrainerConfig,
+        dataset: Optional[Dict] = None,
+        envs: Optional[VectorEnv] = None,
+        eval_metric: Optional[Metric] = None,
+    ):
         super().__init__(cfg=cfg, envs=envs, eval_metric=eval_metric)
 
         self.dataset = dataset
@@ -464,7 +470,12 @@ class OnlineTrainer(Trainer):
         return self.buffer.sample(batch_size)
 
 
-def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None) -> Trainer:
+def get_trainer(
+    cfg: TrainerConfig,
+    dataset: Optional[Dict] = None,
+    envs: Optional[VectorEnv] = None,
+    eval_metric: Optional[Metric] = None,
+) -> Trainer:
     trainer_map = {
         "pretrain": OfflineTrainer,
         "refine": OfflineTrainer,

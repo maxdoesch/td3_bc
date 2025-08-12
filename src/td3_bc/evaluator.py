@@ -44,8 +44,12 @@ class RewardAndLengthMetric(Metric):
         self.episode_lengths = []
 
     def step(self, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
-        self.current_rewards = np.zeros_like(rewards) if self.current_rewards is None else self.current_rewards + rewards
-        self.current_lengths = np.zeros_like(dones, dtype=np.uint32) if self.current_lengths is None else self.current_lengths + 1
+        self.current_rewards = (
+            np.zeros_like(rewards) if self.current_rewards is None else self.current_rewards + rewards
+        )
+        self.current_lengths = (
+            np.zeros_like(dones, dtype=np.uint32) if self.current_lengths is None else self.current_lengths + 1
+        )
 
     def on_episode_end(self, env_idx: int) -> None:
         self.episode_rewards.append(self.current_rewards[env_idx])

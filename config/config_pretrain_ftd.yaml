@@ -39,11 +39,14 @@ train_mode:
         attention_embed_dim: 128
         attention_heads: 4
 
+      selector_cnn_cfg:
+        conv_layers: 11
+        conv_filters: 32
+
       num_regions: 10
       num_channels: 3
       num_stack: 1
 
-      num_shared_layers: 11
       num_head_layers: 0
       projection_dim: 100
 

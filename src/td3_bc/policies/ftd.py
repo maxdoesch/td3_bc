@@ -6,22 +6,31 @@ from typing import Tuple, Union, Optional
 from .policy import PolicyConfig, BaseActor, BaseCritic
 from .mlp import MlpActor, MlpCritic
 
+
 @dataclass
 class ImageAttentionSelectorConfig:
-    conv_layers: int = 5               # Number of convolutional layers
-    conv_filters: int = 32              # Number of filters in conv layers
-    attention_embed_dim: int = 128      # Embedding dimension for attention
-    attention_heads: int = 4             # Number of attention heads
+    conv_layers: int = 5  # Number of convolutional layers
+    conv_filters: int = 32  # Number of filters in conv layers
+    attention_embed_dim: int = 128  # Embedding dimension for attention
+    attention_heads: int = 4  # Number of attention heads
+
+
+@dataclass
+class SelectorCNNConfig:
+    conv_layers: int = 11
+    conv_filters: int = 32
+
 
 @PolicyConfig.register_subclass("ftd")
 @dataclass
 class FtdPolicyConfig(PolicyConfig):
     attn_selector_cfg: Optional[ImageAttentionSelectorConfig] = field(default_factory=ImageAttentionSelectorConfig)
+    selector_cnn_cfg: SelectorCNNConfig = field(default_factory=SelectorCNNConfig)
 
     num_regions: int = 10  # Maximum number of segmented regions
     num_channels: int = 3  # Number of input channels
     num_stack: int = 1  # Number of frames stacked together as a single observation
-    num_shared_layers: int = 11  # Number of shared convolutional layers
+
     num_head_layers: int = 0  # Number of hidden layers in the head CNN
     projection_dim: int = (
         100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
@@ -94,23 +103,27 @@ class HeadCNN(nn.Module):
 
 
 class SelectorCNN(nn.Module):
-    def __init__(
-        self, selector_layers, obs_shape, region_num=5, in_channels=3, stack_num=3, num_shared_layers=11, num_filters=32
-    ):
+    def __init__(self, obs_shape: Tuple[int, int, int], in_channels: int, stack_num: int, cfg: SelectorCNNConfig):
         super().__init__()
         assert len(obs_shape) == 3
-        # assert region_num * in_channels * stack_num == obs_shape[0]
-        self.obs_shape = obs_shape # (C, H, W)
+
+        self.obs_shape = obs_shape  # (C, H, W)
         self.in_channels = in_channels
         self.stack_num = stack_num
-        self.num_filters = num_filters
 
-        self.selector_layers = selector_layers
+        self.conv_layers = cfg.conv_layers
+        self.conv_filters = cfg.conv_filters
 
-        self.shared_layers = [nn.Conv2d(self.stack_num * self.in_channels, num_filters, 3, stride=2)]
-        for _ in range(1, num_shared_layers):
+        self.shared_layers = [
+            nn.Conv2d(
+                in_channels=self.stack_num * self.in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2
+            )
+        ]
+        for _ in range(1, self.conv_layers):
             self.shared_layers.append(nn.ReLU())
-            self.shared_layers.append(nn.Conv2d(num_filters, num_filters, 3, stride=1))
+            self.shared_layers.append(
+                nn.Conv2d(in_channels=self.conv_filters, out_channels=self.conv_filters, kernel_size=3, stride=1)
+            )
         self.shared_layers = nn.Sequential(*self.shared_layers)
 
         self.out_shape = _get_out_shape(
@@ -119,30 +132,34 @@ class SelectorCNN(nn.Module):
         self.shared_layers.apply(weight_init)
 
     def forward(self, x):
-        x = self.selector_layers(x)
         x = self.shared_layers(x)
 
         return x
 
 
 class Encoder(nn.Module):
-    def __init__(self, shared_cnn, head_cnn, projection):
+    def __init__(self, shared_ftd, projection):
         super().__init__()
-        self.shared_cnn = shared_cnn
-        self.head_cnn = head_cnn
+        self.shared_ftd = shared_ftd
         self.projection = projection
         self.out_dim = projection.out_dim
 
     def forward(self, x, detach=False):
-        x = self.shared_cnn(x)
-        x = self.head_cnn(x)
+        x = self.shared_ftd(x)
         if detach:
             x = x.detach()
         return self.projection(x)
 
 
 class ImageAttentionSelectorLayers(nn.Module):
-    def __init__(self, obs_shape: Tuple[int, int, int], region_num: int, in_channels: int, stack_num: int, cfg: ImageAttentionSelectorConfig):
+    def __init__(
+        self,
+        obs_shape: Tuple[int, int, int],
+        region_num: int,
+        in_channels: int,
+        stack_num: int,
+        cfg: ImageAttentionSelectorConfig,
+    ):
         super().__init__()
 
         self.obs_shape = obs_shape
@@ -156,10 +173,16 @@ class ImageAttentionSelectorLayers(nn.Module):
         self.attention_heads = cfg.attention_heads
 
         reduced_img_height = obs_shape[1] // 2
-        self.layers = [nn.Conv2d(in_channels=in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2, padding=1)]
+        self.layers = [
+            nn.Conv2d(in_channels=in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2, padding=1)
+        ]
         for _ in range(1, self.conv_layers):
             self.layers.append(nn.ReLU())
-            self.layers.append(nn.Conv2d(in_channels=self.conv_filters, out_channels=self.conv_filters, kernel_size=3, stride=1, padding=1))
+            self.layers.append(
+                nn.Conv2d(
+                    in_channels=self.conv_filters, out_channels=self.conv_filters, kernel_size=3, stride=1, padding=1
+                )
+            )
             self.layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
             reduced_img_height = reduced_img_height // 2
         self.layers.append(Flatten())
@@ -188,7 +211,11 @@ class ImageAttentionSelectorLayers(nn.Module):
         tokens_frame = tokens[:, -1:, :]
         tokens_segment = tokens[:, :-1, :]
         q = self.q(tokens_frame).reshape(B * S, 1, self.attention_heads, self.attention_embed_dim).transpose(-3, -2)
-        k = self.k(tokens_segment).reshape(B * S, R - 1, self.attention_heads, self.attention_embed_dim).transpose(-3, -2)
+        k = (
+            self.k(tokens_segment)
+            .reshape(B * S, R - 1, self.attention_heads, self.attention_embed_dim)
+            .transpose(-3, -2)
+        )
         v = x.reshape(B * S, R, C * H * W)[:, :-1, :]
 
         attention = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(k.shape[-1], dtype=torch.float32))
@@ -217,27 +244,28 @@ class SharedFTDLayers(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        self.image_attention_selector = ImageAttentionSelectorLayers(
-            obs_shape=obs_shape,
-            region_num=cfg.num_regions,
-            in_channels=cfg.num_channels,
-            stack_num=cfg.num_stack,
-            cfg=cfg.attn_selector_cfg
-        ) if cfg.attn_selector_cfg else nn.Identity()
-
-        self.selector_cnn = SelectorCNN(
-            self.image_attention_selector,
-            obs_shape,
-            cfg.num_regions,
-            cfg.num_channels,
-            cfg.num_stack,
-            cfg.num_shared_layers,
-            cfg.attn_selector_cfg.conv_filters, # fix!!!!!!!!!
+        self.image_attention_selector = (
+            ImageAttentionSelectorLayers(
+                obs_shape=obs_shape,
+                region_num=cfg.num_regions,
+                in_channels=cfg.num_channels,
+                stack_num=cfg.num_stack,
+                cfg=cfg.attn_selector_cfg,
+            )
+            if cfg.attn_selector_cfg
+            else nn.Identity()
         )
 
-        self.head_cnn = HeadCNN(self.selector_cnn.out_shape, cfg.num_head_layers, cfg.attn_selector_cfg.conv_filters) # fix!!!!!!!!!
+        self.selector_cnn = SelectorCNN(
+            obs_shape=obs_shape, in_channels=cfg.num_channels, stack_num=cfg.num_stack, cfg=cfg.selector_cnn_cfg
+        )
+
+        self.head_cnn = HeadCNN(
+            self.selector_cnn.out_shape, cfg.num_head_layers, cfg.attn_selector_cfg.conv_filters
+        )  # fix!!!!!!!!!
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        obs = self.image_attention_selector(obs)
         obs = self.selector_cnn(obs)
         obs = self.head_cnn(obs)
         return obs
@@ -252,7 +280,7 @@ class FTDActor(BaseActor):
 
         projection = RLProjection(shared_layers.head_cnn.out_shape, shared_layers.cfg.projection_dim)
 
-        self.encoder = Encoder(shared_layers.selector_cnn, shared_layers.head_cnn, projection)
+        self.encoder = Encoder(self.shared_layers, projection)
 
         self.actor = MlpActor(self.encoder.out_dim, action_dim, hidden_dim=256, n_layers=2, max_action=max_action)
 
@@ -269,7 +297,7 @@ class FTDCritic(BaseCritic):
 
         projection = RLProjection(shared_layers.head_cnn.out_shape, shared_layers.cfg.projection_dim)
 
-        self.encoder = Encoder(shared_layers.selector_cnn, shared_layers.head_cnn, projection)
+        self.encoder = Encoder(self.shared_layers, projection)
 
         self.critic = MlpCritic(self.encoder.out_dim, action_dim, hidden_dim=256, n_layers=2)
 
@@ -287,12 +315,10 @@ class FTDCritic(BaseCritic):
         return self.critic.q2(proj, action)
 
 
-if __name__ == "__main__":
+def main():
     # Example usage
     obs_shape = (33, 256, 256)
     action_dim = 4
-    hidden_dim = 64
-    n_layers = 2
     max_action = 1.0
 
     batch_size = 32
@@ -312,3 +338,7 @@ if __name__ == "__main__":
     print("Action:", action.shape)
     print("Q1:", q1.shape)
     print("Q2:", q2.shape)
+
+
+if __name__ == "__main__":
+    main()
