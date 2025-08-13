@@ -1,6 +1,6 @@
 train_steps: 100000
 eval_freq: 10000
-eval_episodes: 2
+eval_episodes: 5
 checkpoint_freq: 10000
 batch_size: 32
 
@@ -12,10 +12,14 @@ checkpoint_dir: ./checkpoints
 
 #experiment_name: <optional>
 
-dataset_path: dmc_distraction/dmc_distraction_cheetah_run_1-v1/expert-v0
+dataset_path: dmc_distraction/dmc_background_cheetah_run_1-v1/expert-v0
 
-env_name: dmc_distraction_cheetah_run_1-v1
+env_name: dmc_background_cheetah_run_1-v1
 num_envs: 1
+env_kwargs:
+  channels_first: True
+  height: 84
+  width: 84
 
 train_mode:
   type: pretrain_ftd
@@ -34,11 +38,7 @@ train_mode:
       type: ftd
 
       shared_layers_cfg: 
-        attn_selector_cfg:
-          conv_layers: 5
-          conv_filters: 32
-          attention_embed_dim: 128
-          attention_heads: 4
+        attn_selector_cfg: null
 
         selector_cnn_cfg:
           conv_layers: 11

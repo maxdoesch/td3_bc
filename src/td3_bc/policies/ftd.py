@@ -21,9 +21,8 @@ class SelectorCNNConfig:
     conv_filters: int = 32
 
 
-@PolicyConfig.register_subclass("ftd")
 @dataclass
-class FtdPolicyConfig(PolicyConfig):
+class SharedFTDLayersConfig:
     attn_selector_cfg: Optional[ImageAttentionSelectorConfig] = field(default_factory=ImageAttentionSelectorConfig)
     selector_cnn_cfg: SelectorCNNConfig = field(default_factory=SelectorCNNConfig)
 
@@ -31,15 +30,35 @@ class FtdPolicyConfig(PolicyConfig):
     num_channels: int = 3  # Number of input channels
     num_stack: int = 1  # Number of frames stacked together as a single observation
 
-    num_head_layers: int = 0  # Number of hidden layers in the head CNN
-    projection_dim: int = (
-        100  # Dimension of the projection space for actor and critic; must match actor and critic input dim
-    )
+
+@dataclass
+class FTDActorConfig:
+    rl_projection_dim: int = 100
+
+    hidden_dim: int = 256
+    n_layers: int = 2
 
 
-def _get_out_shape(in_shape, layers, device="cpu"):
-    x = torch.randn(*in_shape).to(device).unsqueeze(0)
-    return layers(x).squeeze(0).shape
+@dataclass
+class FTDCriticConfig:
+    rl_projection_dim: int = 100
+
+    hidden_dim: int = 256
+    n_layers: int = 2
+
+
+@PolicyConfig.register_subclass("ftd")
+@dataclass
+class FtdPolicyConfig(PolicyConfig):
+    shared_layers_cfg: SharedFTDLayersConfig = field(default_factory=SharedFTDLayersConfig)
+
+    actor_cfg: FTDActorConfig = field(default_factory=FTDActorConfig)
+    critic_cfg: FTDCriticConfig = field(default_factory=FTDCriticConfig)
+
+
+def get_out_shape(in_shape: Tuple[int, ...], module: nn.Module) -> Tuple[int, ...]:
+    x = torch.randn((1, *in_shape), device=next(module.parameters()).device)
+    return module(x)[0].shape
 
 
 def weight_init(m):
@@ -59,50 +78,20 @@ def weight_init(m):
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
-class NormalizeImg(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x / 255.0
-
-
-class Flatten(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x.view(x.size(0), -1)
-
-
 class RLProjection(nn.Module):
-    def __init__(self, in_shape, out_dim):
+    def __init__(self, in_dim: int, out_dim: int):
         super().__init__()
+
+        self.projection = nn.Sequential(nn.Linear(in_dim, out_dim), nn.LayerNorm(out_dim), nn.Tanh())
         self.out_dim = out_dim
-        self.projection = nn.Sequential(nn.Linear(in_shape[0], out_dim), nn.LayerNorm(out_dim), nn.Tanh())
+
         self.apply(weight_init)
 
     def forward(self, x):
         return self.projection(x)
 
 
-class HeadCNN(nn.Module):
-    def __init__(self, in_shape, num_layers=0, num_filters=32):
-        super().__init__()
-        self.layers = []
-        for _ in range(0, num_layers):
-            self.layers.append(nn.ReLU())
-            self.layers.append(nn.Conv2d(num_filters, num_filters, 3, stride=1))
-        self.layers.append(Flatten())
-        self.layers = nn.Sequential(*self.layers)
-        self.out_shape = _get_out_shape(in_shape, self.layers)
-        self.apply(weight_init)
-
-    def forward(self, x):
-        return self.layers(x)
-
-
-class SelectorCNN(nn.Module):
+class FeatureExtractorCNN(nn.Module):
     def __init__(self, obs_shape: Tuple[int, int, int], in_channels: int, stack_num: int, cfg: SelectorCNNConfig):
         super().__init__()
         assert len(obs_shape) == 3
@@ -114,41 +103,25 @@ class SelectorCNN(nn.Module):
         self.conv_layers = cfg.conv_layers
         self.conv_filters = cfg.conv_filters
 
-        self.shared_layers = [
+        self.feature_extractor = [
             nn.Conv2d(
                 in_channels=self.stack_num * self.in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2
             )
         ]
         for _ in range(1, self.conv_layers):
-            self.shared_layers.append(nn.ReLU())
-            self.shared_layers.append(
+            self.feature_extractor.append(nn.ReLU())
+            self.feature_extractor.append(
                 nn.Conv2d(in_channels=self.conv_filters, out_channels=self.conv_filters, kernel_size=3, stride=1)
             )
-        self.shared_layers = nn.Sequential(*self.shared_layers)
+        self.feature_extractor.append(nn.Flatten())
+        self.feature_extractor = nn.Sequential(*self.feature_extractor)
 
-        self.out_shape = _get_out_shape(
-            [self.stack_num * self.in_channels, self.obs_shape[-2], self.obs_shape[-1]], self.shared_layers
-        )
-        self.shared_layers.apply(weight_init)
+        self.feature_extractor.apply(weight_init)
 
     def forward(self, x):
-        x = self.shared_layers(x)
+        x = self.feature_extractor(x)
 
         return x
-
-
-class Encoder(nn.Module):
-    def __init__(self, shared_ftd, projection):
-        super().__init__()
-        self.shared_ftd = shared_ftd
-        self.projection = projection
-        self.out_dim = projection.out_dim
-
-    def forward(self, x, detach=False):
-        x = self.shared_ftd(x)
-        if detach:
-            x = x.detach()
-        return self.projection(x)
 
 
 class ImageAttentionSelectorLayers(nn.Module):
@@ -185,7 +158,7 @@ class ImageAttentionSelectorLayers(nn.Module):
             )
             self.layers.append(nn.MaxPool2d(kernel_size=2, stride=2))
             reduced_img_height = reduced_img_height // 2
-        self.layers.append(Flatten())
+        self.layers.append(nn.Flatten())
 
         out_num = self.conv_filters * reduced_img_height**2
         self.layers.append(nn.Linear(out_num, self.attention_embed_dim))
@@ -240,8 +213,9 @@ class ImageAttentionSelectorLayers(nn.Module):
 
 
 class SharedFTDLayers(nn.Module):
-    def __init__(self, obs_shape: tuple[int, int, int], cfg: FtdPolicyConfig):
+    def __init__(self, obs_shape: tuple[int, int, int], cfg: SharedFTDLayersConfig):
         super().__init__()
+
         self.cfg = cfg
 
         self.image_attention_selector = (
@@ -256,33 +230,71 @@ class SharedFTDLayers(nn.Module):
             else nn.Identity()
         )
 
-        self.selector_cnn = SelectorCNN(
+        self.feature_exctractor_cnn = FeatureExtractorCNN(
             obs_shape=obs_shape, in_channels=cfg.num_channels, stack_num=cfg.num_stack, cfg=cfg.selector_cnn_cfg
         )
 
-        self.head_cnn = HeadCNN(
-            self.selector_cnn.out_shape, cfg.num_head_layers, cfg.attn_selector_cfg.conv_filters
-        )  # fix!!!!!!!!!
+        self.out_dim = get_out_shape(
+            in_shape=(obs_shape),
+            module=nn.Sequential(
+                self.image_attention_selector,
+                self.feature_exctractor_cnn,
+            ),
+        )[0]
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         obs = self.image_attention_selector(obs)
-        obs = self.selector_cnn(obs)
-        obs = self.head_cnn(obs)
+        obs = self.feature_exctractor_cnn(obs)
         return obs
+
+    def select_image(self, obs: torch.Tensor):
+        with torch.no_grad():
+            obs = self.image_attention_selector(obs.unsqueeze(0))  # Add batch dimension
+            obs = obs.squeeze()[-self.cfg.num_channels :]
+            obs = obs.permute(1, 2, 0)  # Convert to (H, W, C) format
+            obs = (255 * obs).to(torch.uint8)  # Convert to uint8 format
+
+        return obs.cpu().numpy()
+
+
+class Encoder(nn.Module):
+    def __init__(self, shared_ftd_layers: SharedFTDLayers, projection: RLProjection):
+        super().__init__()
+        self.shared_ftd_layers = shared_ftd_layers
+        self.projection = projection
+        self.out_dim = projection.out_dim
+
+    def forward(self, x):
+        x = self.shared_ftd_layers(x)
+
+        return self.projection(x)
 
 
 class FTDActor(BaseActor):
     def __init__(
-        self, shared_layers: SharedFTDLayers, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float
+        self,
+        shared_ftd_layers: SharedFTDLayers,
+        obs_shape: Union[int, Tuple[int, ...]],
+        action_dim: int,
+        max_action: float,
+        cfg: FTDActorConfig,
     ):
-        super().__init__(obs_shape, action_dim, max_action)
-        self.shared_layers = shared_layers
+        super().__init__(obs_shape=obs_shape, action_dim=action_dim, max_action=max_action)
 
-        projection = RLProjection(shared_layers.head_cnn.out_shape, shared_layers.cfg.projection_dim)
+        rl_projection = RLProjection(
+            in_dim=shared_ftd_layers.out_dim,
+            out_dim=cfg.rl_projection_dim,
+        )
 
-        self.encoder = Encoder(self.shared_layers, projection)
+        self.encoder = Encoder(shared_ftd_layers=shared_ftd_layers, projection=rl_projection)
 
-        self.actor = MlpActor(self.encoder.out_dim, action_dim, hidden_dim=256, n_layers=2, max_action=max_action)
+        self.actor = MlpActor(
+            obs_shape=cfg.rl_projection_dim,
+            action_dim=action_dim,
+            hidden_dim=cfg.hidden_dim,
+            n_layers=cfg.n_layers,
+            max_action=max_action,
+        )
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         proj = self.encoder(obs)
@@ -291,15 +303,25 @@ class FTDActor(BaseActor):
 
 
 class FTDCritic(BaseCritic):
-    def __init__(self, shared_layers: SharedFTDLayers, obs_shape: Union[int, Tuple[int, ...]], action_dim: int):
-        super().__init__(obs_shape, action_dim)
-        self.shared_layers = shared_layers
+    def __init__(
+        self,
+        shared_layers: SharedFTDLayers,
+        obs_shape: Union[int, Tuple[int, ...]],
+        action_dim: int,
+        cfg: FTDCriticConfig,
+    ):
+        super().__init__(obs_shape=obs_shape, action_dim=action_dim)
 
-        projection = RLProjection(shared_layers.head_cnn.out_shape, shared_layers.cfg.projection_dim)
+        rl_projection = RLProjection(
+            in_dim=shared_layers.out_dim,
+            out_dim=cfg.rl_projection_dim,
+        )
 
-        self.encoder = Encoder(self.shared_layers, projection)
+        self.encoder = Encoder(shared_ftd_layers=shared_layers, projection=rl_projection)
 
-        self.critic = MlpCritic(self.encoder.out_dim, action_dim, hidden_dim=256, n_layers=2)
+        self.critic = MlpCritic(
+            obs_shape=cfg.rl_projection_dim, action_dim=action_dim, hidden_dim=cfg.hidden_dim, n_layers=cfg.n_layers
+        )
 
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         proj = self.encoder(obs)
@@ -325,9 +347,9 @@ def main():
 
     # Create actor and critic
     config = FtdPolicyConfig()
-    encoder = SharedFTDLayers(obs_shape, config)
-    actor = FTDActor(encoder, obs_shape, action_dim, max_action)
-    critic = FTDCritic(encoder, obs_shape, action_dim)
+    encoder = SharedFTDLayers(obs_shape, config.shared_layers_cfg)
+    actor = FTDActor(encoder, obs_shape, action_dim, max_action, config.actor_cfg)
+    critic = FTDCritic(encoder, obs_shape, action_dim, config.critic_cfg)
 
     obs = torch.randn(batch_size, *obs_shape)
     action = torch.randn(batch_size, action_dim)

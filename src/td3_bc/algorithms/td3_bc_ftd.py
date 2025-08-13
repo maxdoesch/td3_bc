@@ -118,23 +118,21 @@ class TD3BC_FTD(TD3BC_Base):
         self.total_it = 0
 
         # === Configuration ===
-
-        self.num_regions = cfg.policy_config.num_regions
-        self.num_channels = cfg.policy_config.num_channels
         self.reward_factor = cfg.reward_factor
         self.inverse_factor = cfg.inverse_factor
         self.max_grad_norm = cfg.max_grad_norm
+
+        self.predictors_update_freq = cfg.predictors_update_freq
+        self.predictors_update_slow_freq = cfg.predictors_update_slow_freq
+        self.predictors_warmup_steps = cfg.predictors_warmup_steps
+
         self.max_action = max_action
         self.discount = cfg.discount
         self.tau = cfg.tau
         self.policy_noise = cfg.policy_noise * self.max_action
         self.noise_clip = cfg.noise_clip * self.max_action
         self.alpha = cfg.alpha
-
         self.policy_freq = cfg.policy_freq
-        self.predictors_update_freq = cfg.predictors_update_freq
-        self.predictors_update_slow_freq = cfg.predictors_update_slow_freq
-        self.predictors_warmup_steps = cfg.predictors_warmup_steps
 
         self.log_img_freq = cfg.log_img_freq
 
@@ -197,32 +195,6 @@ class TD3BC_FTD(TD3BC_Base):
         self.inverse_dynamic_predictor_optimizer.step()
 
         return predict_loss.item()
-
-    def _obs_to_input(self, obs) -> torch.Tensor:
-        if isinstance(obs, np.ndarray):
-            obs = torch.FloatTensor(obs).to(self.device)
-        elif isinstance(obs, torch.Tensor):
-            obs = obs.to(self.device)
-        else:
-            raise TypeError(f"Unsupported observation type: {type(obs)}. Expected np.ndarray or torch.Tensor.")
-        if len(obs.shape) == 3:
-            obs = obs.unsqueeze(0)  # Add batch dimension
-
-        assert len(obs.shape) == 4, (
-            f"Expected observation shape to be (batch_size, channels, height, width), got {obs.shape}"
-        )
-        assert obs.shape[0] == 1, f"Expected batch size of 1, got {obs.shape[0]}"
-
-        return obs
-
-    def select_image(self, obs):
-        with torch.no_grad():
-            current_obs = self._obs_to_input(obs)
-            obs, logits = self.complete_selector(current_obs, return_all=True)
-            selected_obs = torch.squeeze(obs)[-self.num_channels :].cpu().numpy()
-            logits = logits.reshape(-1, self.num_regions)[-1].cpu().detach().tolist()
-            print(f"Selected observation shape: {selected_obs.shape}")
-            return logits, np.transpose(selected_obs * 255, (1, 2, 0)).astype(np.uint8)
 
     def save(self, dir_path: str):
         file_path = os.path.join(dir_path, "td3_bc_ftd.pt")
@@ -315,7 +287,9 @@ class TD3BC_FTD(TD3BC_Base):
 
         if self.log_img_freq != 0 and self.total_it % self.log_img_freq == 0:
             metrics["train/raw_images"] = wandb.Image(batch["obs"][0][-3:])
-            metrics["train/ftd_images"] = wandb.Image(self.select_image(batch["obs"][0])[1])
+            metrics["train/ftd_images"] = wandb.Image(
+                self.critic.encoder.shared_ftd_layers.select_image(batch["obs"][0])
+            )
 
         metrics["train/time"] = time.time() - start_time
 
