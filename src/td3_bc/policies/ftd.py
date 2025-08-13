@@ -16,7 +16,7 @@ class ImageAttentionSelectorConfig:
 
 
 @dataclass
-class SelectorCNNConfig:
+class FeatureExtractorConfig:
     conv_layers: int = 11
     conv_filters: int = 32
 
@@ -24,7 +24,7 @@ class SelectorCNNConfig:
 @dataclass
 class SharedFTDLayersConfig:
     attn_selector_cfg: Optional[ImageAttentionSelectorConfig] = field(default_factory=ImageAttentionSelectorConfig)
-    selector_cnn_cfg: SelectorCNNConfig = field(default_factory=SelectorCNNConfig)
+    feature_extractor_cfg: FeatureExtractorConfig = field(default_factory=FeatureExtractorConfig)
 
     num_regions: int = 10  # Maximum number of segmented regions
     num_channels: int = 3  # Number of input channels
@@ -92,7 +92,7 @@ class RLProjection(nn.Module):
 
 
 class FeatureExtractorCNN(nn.Module):
-    def __init__(self, obs_shape: Tuple[int, int, int], in_channels: int, stack_num: int, cfg: SelectorCNNConfig):
+    def __init__(self, obs_shape: Tuple[int, int, int], in_channels: int, stack_num: int, cfg: FeatureExtractorConfig):
         super().__init__()
         assert len(obs_shape) == 3
 
@@ -231,11 +231,11 @@ class SharedFTDLayers(nn.Module):
         )
 
         self.feature_exctractor_cnn = FeatureExtractorCNN(
-            obs_shape=obs_shape, in_channels=cfg.num_channels, stack_num=cfg.num_stack, cfg=cfg.selector_cnn_cfg
+            obs_shape=obs_shape, in_channels=cfg.num_channels, stack_num=cfg.num_stack, cfg=cfg.feature_extractor_cfg
         )
 
         self.out_dim = get_out_shape(
-            in_shape=(obs_shape),
+            in_shape=obs_shape,
             module=nn.Sequential(
                 self.image_attention_selector,
                 self.feature_exctractor_cnn,

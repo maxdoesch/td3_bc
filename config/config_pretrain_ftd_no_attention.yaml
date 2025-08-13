@@ -40,7 +40,7 @@ train_mode:
       shared_layers_cfg: 
         attn_selector_cfg: null
 
-        selector_cnn_cfg:
+        feature_extractor_cfg:
           conv_layers: 11
           conv_filters: 32
 
