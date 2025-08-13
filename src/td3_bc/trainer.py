@@ -287,7 +287,7 @@ class Trainer(ABC):
 
         return pretrain_dir, pretrain_checkpoint, start_step, run_id
 
-    def train(self):
+    def train(self) -> Dict:
         for seed in self.cfg.seeds:
             pretrain_dir, pretrain_checkpoint, start_step, run_id = self._check_resume(seed)
             if run_id == "skip":
@@ -330,6 +330,8 @@ class Trainer(ABC):
                 metric=self.eval_metric,
             )
 
+            eval_metrics = {}
+
             for i in tqdm(
                 range(start_step, self.cfg.train_steps),
                 desc="Training Steps",
@@ -341,14 +343,14 @@ class Trainer(ABC):
 
                 run.log(metrics, step=i)
 
-                if (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0:
+                if self.cfg.eval_freq > 0 and ((i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0):
                     self.agent.eval()
                     eval_metrics = self.evaluator.evaluate(self.agent)
                     self.agent.train()
 
                     run.log(eval_metrics, step=i)
 
-                if (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1:
+                if self.cfg.checkpoint_freq > 0 and ((i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1):
                     checkpoint_dir = os.path.join(self.cfg.checkpoint_mode_dir, f"seed_{seed}", f"checkpoint_{i + 1}")
                     os.makedirs(checkpoint_dir, exist_ok=True)
                     self.agent.save(checkpoint_dir)
@@ -358,6 +360,8 @@ class Trainer(ABC):
                     self.agent.save(latest_checkpoint)
 
             run.finish()
+
+            return eval_metrics
 
 
 class OfflineTrainer(Trainer):
