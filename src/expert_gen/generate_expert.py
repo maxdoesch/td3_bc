@@ -118,7 +118,7 @@ def generate_expert_dataset(
 
     # Handle dataset naming and duplication
     if dataset_id is None:
-        dataset_id = f"dmc_distraction/{env_id}/{skill_level}-v0"
+        dataset_id = f"dmc/{env_id}/{skill_level}-v0"
     if dataset_id in list_local_datasets():
         raise ValueError(f"Dataset ID '{dataset_id}' already exists. Please choose a different ID.")
 
@@ -134,7 +134,7 @@ def generate_expert_dataset(
         os.makedirs(gif_dir, exist_ok=True)
 
     for _ in tqdm.tqdm(range(total_steps), desc=f"Generating dataset for {skill_level} skill level"):
-        action, _ = model.predict(obs, deterministic=True)
+        action, _ = model.predict(obs, deterministic=False)
         obs, reward, terminated, truncated, info = env.step(action)
         # print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")
 

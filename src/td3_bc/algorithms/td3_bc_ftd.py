@@ -248,7 +248,7 @@ class TD3BC_FTD(TD3BC_Base):
             and self.total_it % self.predictors_update_slow_freq == 0
         ):
             self.unsupervised_update_freq = self.unsupervised_update_freq + 1
-            logging.debug(f"Slowing predictors update frequency to {self.unsupervised_update_freq}.")
+            metrics["train/unsupervised_update_freq"] = self.unsupervised_update_freq
 
         # Update critic
         critic_loss, avg_q1, avg_q2 = self.update_critic(**batch)
