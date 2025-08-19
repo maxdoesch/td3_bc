@@ -57,7 +57,7 @@ class DMCWrapper(Env):
         height: int = 84,
         width: int = 84,
         camera_id: int = 0,
-        frame_skip: int = 1,
+        action_repeat: int = 1,
         environment_kwargs: Optional[Dict] = None,
         channels_first: bool = True,
     ):
@@ -67,7 +67,7 @@ class DMCWrapper(Env):
         self._height = height
         self._width = width
         self._camera_id = camera_id
-        self._frame_skip = frame_skip
+        self._action_repeat = action_repeat
         self._channels_first = channels_first
 
         # create task
@@ -149,7 +149,7 @@ class DMCWrapper(Env):
 
     @property
     def reward_range(self):
-        return 0, self._frame_skip
+        return 0, self._action_repeat
 
     def seed(self, seed=None):
         if seed is not None:
@@ -167,7 +167,7 @@ class DMCWrapper(Env):
         reward = 0
         extra = {"internal_state": self._env.physics.get_state().copy()}
 
-        for _ in range(self._frame_skip):
+        for _ in range(self._action_repeat):
             time_step = self._env.step(action)
             reward += time_step.reward or 0
             terminated = time_step.last()
@@ -210,7 +210,7 @@ class DMCWrapperBackground(DMCWrapper):
         height: int = 84,
         width: int = 84,
         camera_id: int = 0,
-        frame_skip: int = 1,
+        action_repeat: int = 1,
         environment_kwargs: Optional[Dict] = None,
         channels_first: bool = True,
         background_color: str = "black",  # green or black
@@ -224,7 +224,7 @@ class DMCWrapperBackground(DMCWrapper):
             height=height,
             width=width,
             camera_id=camera_id,
-            frame_skip=frame_skip,
+            action_repeat=action_repeat,
             environment_kwargs=environment_kwargs,
             channels_first=channels_first,
         )
@@ -263,7 +263,7 @@ class DistractionDMCWrapper(DMCWrapperBackground):
         height: int = 84,
         width: int = 84,
         camera_id: int = 0,
-        frame_skip: int = 1,
+        action_repeat: int = 1,
         environment_kwargs: Optional[Dict] = None,
         channels_first: bool = True,
         is_train: bool = True,
@@ -278,7 +278,7 @@ class DistractionDMCWrapper(DMCWrapperBackground):
             height=height,
             width=width,
             camera_id=camera_id,
-            frame_skip=frame_skip,
+            action_repeat=action_repeat,
             environment_kwargs=environment_kwargs,
             channels_first=channels_first,
             background_color="green",  # green background for distraction

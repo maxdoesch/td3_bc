@@ -208,6 +208,7 @@ class TD3BC_FTD(TD3BC_Base):
                 "reward_predictor_optimizer_state_dict": self.reward_predictor_optimizer.state_dict(),
                 "inverse_dynamic_predictor_state_dict": self.inverse_dynamic_predictor.state_dict(),
                 "inverse_dynamic_predictor_optimizer_state_dict": self.inverse_dynamic_predictor_optimizer.state_dict(),
+                "predictors_update_freq": self.predictors_update_freq,
             },
             file_path,
         )
@@ -234,6 +235,8 @@ class TD3BC_FTD(TD3BC_Base):
             checkpoint["inverse_dynamic_predictor_optimizer_state_dict"]
         )
 
+        self.predictors_update_freq = checkpoint["predictors_update_freq"]
+
         logging.debug(f"Model parameters loaded from: {file_path}.")
 
     def train_step(self, batch: dict[str, torch.Tensor]) -> dict[str, float | np.ndarray]:
@@ -247,8 +250,8 @@ class TD3BC_FTD(TD3BC_Base):
             and self.total_it > self.predictors_warmup_steps
             and self.total_it % self.predictors_update_slow_freq == 0
         ):
-            self.unsupervised_update_freq = self.unsupervised_update_freq + 1
-            metrics["train/unsupervised_update_freq"] = self.unsupervised_update_freq
+            self.predictors_update_freq += 1
+            metrics["train/predictors_update_freq"] = self.predictors_update_freq
 
         # Update critic
         critic_loss, avg_q1, avg_q2 = self.update_critic(**batch)

@@ -67,6 +67,7 @@ def generate_expert_dataset(
     expert_path: str,
     skill_level: str,
     save_to_gif: bool,
+    action_repeat: int
 ):
     # Determine checkpoint
     checkpoints_dir = os.path.join(expert_path, "checkpoints")
@@ -82,6 +83,7 @@ def generate_expert_dataset(
     env_kwargs["channels_first"] = gen_segmentation
     env_kwargs["height"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
     env_kwargs["width"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
+    env_kwargs["action_repeat"] = action_repeat
     if gen_segmentation:
         env_kwargs["is_train"] = True
 
@@ -184,6 +186,7 @@ def main():
     parser.add_argument("--expert-path", type=str, default="checkpoints/expert_models")
     parser.add_argument("--gen-segmentation", action="store_true", help="Generate segmentation masks in the dataset.")
     parser.add_argument("--save-to-gif", action="store_true")
+    parser.add_argument("--action-repeat", type=int, default=1, help="Action repeat for the environment.")
     args = parser.parse_args()
 
     for level in SKILL_LEVEL:
@@ -196,6 +199,7 @@ def main():
             total_steps=args.total_steps,
             expert_path=args.expert_path,
             skill_level=level,
+            action_repeat=args.action_repeat,
             save_to_gif=args.save_to_gif,
         )
 

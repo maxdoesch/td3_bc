@@ -18,7 +18,7 @@ def make(
     height: int = 84,
     width: int = 84,
     camera_id: int = 0,
-    frame_skip: int = 1,
+    action_repeat: int = 1,
     episode_length: int = 1000,
     environment_kwargs: Optional[Dict] = None,
     time_limit: Optional[float] = None,
@@ -39,7 +39,7 @@ def make(
         assert not visualize_reward, "cannot use visualize reward when learning from pixels"
 
     # shorten episode length
-    max_episode_steps = (episode_length + frame_skip - 1) // frame_skip
+    max_episode_steps = (episode_length + action_repeat - 1) // action_repeat
 
     if env_id not in gymnasium.envs.registration.registry:
         task_kwargs = {}
@@ -60,7 +60,7 @@ def make(
                 height=height,
                 width=width,
                 camera_id=camera_id,
-                frame_skip=frame_skip,
+                action_repeat=action_repeat,
                 channels_first=channels_first,
             ),
             max_episode_steps=max_episode_steps,
@@ -78,7 +78,7 @@ for domain_name, task_name in suite._get_tasks(tag=None):
             height=84,
             width=84,
             camera_id=0,
-            frame_skip=1,
+            action_repeat=1,
             episode_length=1000,
             environment_kwargs=None,
             time_limit=None,

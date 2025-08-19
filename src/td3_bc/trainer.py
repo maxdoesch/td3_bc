@@ -343,14 +343,18 @@ class Trainer(ABC):
 
                 run.log(metrics, step=i)
 
-                if self.cfg.eval_freq > 0 and ((i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0):
+                if self.cfg.eval_freq > 0 and (
+                    (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0
+                ):
                     self.agent.eval()
                     eval_metrics = self.evaluator.evaluate(self.agent)
                     self.agent.train()
 
                     run.log(eval_metrics, step=i)
 
-                if self.cfg.checkpoint_freq > 0 and ((i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1):
+                if self.cfg.checkpoint_freq > 0 and (
+                    (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1
+                ):
                     checkpoint_dir = os.path.join(self.cfg.checkpoint_mode_dir, f"seed_{seed}", f"checkpoint_{i + 1}")
                     os.makedirs(checkpoint_dir, exist_ok=True)
                     self.agent.save(checkpoint_dir)
