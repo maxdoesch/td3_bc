@@ -3,46 +3,54 @@ from PIL import Image
 from typing import Tuple
 
 
-def resize_stacked_images(stacked_image: np.ndarray, shape: Tuple[int, int]) -> np.ndarray:
-    if stacked_image.ndim != 3:
-        raise ValueError("Expected 3D input array")
+def resize_stacked_images(
+    stacked_image: np.ndarray,
+    shape: Tuple[int, int],
+    is_channels_first: bool,
+) -> np.ndarray:
+    """
+    Nearest-neighbor resize for stacked RGB images.
 
-    new_height, new_width = shape
+    Supports:
+      - 3D, channels-first: (3*k, H, W)
+      - 3D, channels-last : (H, W, 3*k)
+      - 4D, channels-first: (N, 3*k, H, W)
+      - 4D, channels-last : (N, H, W, 3*k)
 
-    if stacked_image.shape[2] % 3 == 0:
-        # Likely HWC
-        H, W, C = stacked_image.shape
-        num_imgs = C // 3
-        scale_y = new_height / H
-        scale_x = new_width / W
+    Returns the same layout with spatial dims resized to (new_H, new_W).
+    """
+    if stacked_image.ndim not in (3, 4):
+        raise ValueError("Expected 3D or 4D input array")
+    new_h, new_w = shape
+    if new_h <= 0 or new_w <= 0:
+        raise ValueError("Target shape must be positive")
 
-        out = np.zeros((new_height, new_width, C), dtype=stacked_image.dtype)
+    # Identify axes for H and W based on layout
+    if stacked_image.ndim == 3:
+        H_axis, W_axis = (1, 2) if is_channels_first else (0, 1)
+        C_axis = 0 if is_channels_first else 2
+        C = stacked_image.shape[C_axis]
+    else:  # 4D
+        H_axis, W_axis = (2, 3) if is_channels_first else (1, 2)
+        C_axis = 1 if is_channels_first else 3
+        C = stacked_image.shape[C_axis]
 
-        for i in range(num_imgs):
-            img = stacked_image[:, :, i * 3 : (i + 1) * 3]
-            y_idx = np.clip((np.arange(new_height) / scale_y).astype(int), 0, H - 1)
-            x_idx = np.clip((np.arange(new_width) / scale_x).astype(int), 0, W - 1)
-            out[:, :, i * 3 : (i + 1) * 3] = img[y_idx[:, None], x_idx[None, :]]
-        return out
+    if C % 3 != 0:
+        raise ValueError(f"Channel dimension must be a multiple of 3 (got {C}).")
 
-    elif stacked_image.shape[0] % 3 == 0:
-        # If first dimension is divisible by 3, assume CHW stacked RGB images
-        C, H, W = stacked_image.shape
-        num_imgs = C // 3
-        scale_y = new_height / H
-        scale_x = new_width / W
+    # Original sizes
+    H = stacked_image.shape[H_axis]
+    W = stacked_image.shape[W_axis]
 
-        out = np.zeros((C, new_height, new_width), dtype=stacked_image.dtype)
+    # Nearest-neighbor index maps (vectorized, no Python loops)
+    y_idx = np.clip((np.arange(new_h) * H / new_h).astype(int), 0, H - 1)
+    x_idx = np.clip((np.arange(new_w) * W / new_w).astype(int), 0, W - 1)
 
-        for i in range(num_imgs):
-            img = stacked_image[i * 3 : (i + 1) * 3, :, :]
-            y_idx = np.clip((np.arange(new_height) / scale_y).astype(int), 0, H - 1)
-            x_idx = np.clip((np.arange(new_width) / scale_x).astype(int), 0, W - 1)
-            out[i * 3 : (i + 1) * 3, :, :] = img[:, y_idx[:, None], x_idx[None, :]]
-        return out
+    # Resize along H and W using np.take to preserve layout
+    out = np.take(stacked_image, y_idx, axis=H_axis)
+    out = np.take(out, x_idx, axis=W_axis)
 
-    else:
-        raise ValueError("Input shape doesn't match expected CHW or HWC stacked RGB format.")
+    return out
 
 
 def rgb_to_hsv_np(rgb: np.ndarray) -> np.ndarray:

@@ -136,12 +136,12 @@ class TD3BC_Online(TD3BC):
 
 if __name__ == "__main__":
     from td3_bc.policies.mlp import MlpPolicyConfig
-    
+
     batch_size = 4
     obs_shape = (3,)
     action_dim = 4
     max_action = 1.0
-    
+
     cfg = TD3BC_Config(policy_config=MlpPolicyConfig())
     agent = TD3BC(obs_shape, action_dim, max_action, cfg)
 

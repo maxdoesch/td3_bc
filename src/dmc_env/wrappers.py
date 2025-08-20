@@ -50,7 +50,7 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         self.observation_space = gym.spaces.Box(
             low=0,
             high=255,
-            shape=((config.num_channels * self.num_regions_with_original, self.H, self.W)),  # (C * R, H, W)
+            shape=((self.num_regions_with_original, config.num_channels, self.H, self.W)),  # (R, C, H, W)
             dtype=np.uint8,
         )
 
@@ -113,51 +113,9 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         else:
             all_segments = masked_segments
 
-        all_segments = all_segments.reshape(self.num_regions_with_original * self.config.num_channels, self.H, self.W)
+        # all_segments = all_segments.reshape(self.num_regions_with_original * self.config.num_channels, self.H, self.W)
 
         return all_segments.byte().cpu().numpy()
-
-
-class LazyFrames(object):
-    def __init__(self, frames, extremely_lazy=True):
-        self._frames = frames
-        self._extremely_lazy = extremely_lazy
-        self._out = None
-
-    @property
-    def frames(self):
-        return self._frames
-
-    def _force(self):
-        if self._extremely_lazy:
-            return np.concatenate(self._frames, axis=0)
-        if self._out is None:
-            self._out = np.concatenate(self._frames, axis=0)
-            self._frames = None
-        return self._out
-
-    def __array__(self, dtype=np.uint8):
-        out = self._force()
-        if dtype is not None:
-            out = out.astype(dtype)
-        return out
-
-    def __len__(self):
-        if self._extremely_lazy:
-            return len(self._frames)
-        return len(self._force())
-
-    def __getitem__(self, i):
-        return self._force()[i]
-
-    def count(self):
-        if self.extremely_lazy:
-            return len(self._frames)
-        frames = self._force()
-        return frames.shape[0] // 3
-
-    def frame(self, i):
-        return self._force()[i * 3 : (i + 1) * 3]
 
 
 class ResizeObservation(gym.ObservationWrapper):
@@ -165,46 +123,106 @@ class ResizeObservation(gym.ObservationWrapper):
 
     def __init__(self, env, shape: Tuple, is_channels_first: bool = True):
         super().__init__(env)
-        self.shape = shape
+        self.shape = tuple(shape)
         self.is_channels_first = is_channels_first
 
-        if self.is_channels_first:
-            self.observation_space = gym.spaces.Box(
-                low=0, high=255, shape=(env.observation_space.shape[0], shape[0], shape[1]), dtype=np.uint8
-            )
+        orig = env.observation_space.shape
+        if len(orig) not in (3, 4):
+            raise ValueError("Observation space must be either 3D or 4D.")
+
+        if is_channels_first:
+            # 3D: (C,H,W)  -> (C,h,w)
+            # 4D: (S,C,H,W)-> (S,C,h,w)
+            if len(orig) == 3:
+                C, _, _ = orig
+                new_shape = (C, *self.shape)
+            else:
+                S, C, _, _ = orig
+                new_shape = (S, C, *self.shape)
         else:
-            self.observation_space = gym.spaces.Box(
-                low=0, high=255, shape=(shape[0], shape[1], env.observation_space.shape[-1]), dtype=np.uint8
-            )
+            # 3D: (H,W,C)  -> (h,w,C)
+            # 4D: (S,H,W,C)-> (S,h,w,C)
+            if len(orig) == 3:
+                _, _, C = orig
+                new_shape = (*self.shape, C)
+            else:
+                S, _, _, C = orig
+                new_shape = (S, *self.shape, C)
+
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=new_shape, dtype=np.uint8)
 
     def observation(self, observation):
-        observation = resize_stacked_images(observation, self.shape)
+        observation = resize_stacked_images(observation, self.shape, self.is_channels_first)
         return observation
 
 
 class FrameStack(gym.Wrapper):
     """Stack frames as observation"""
 
-    def __init__(self, env, k):
+    def __init__(self, env, k: int = 4):
         gym.Wrapper.__init__(self, env)
         self._k = k
         self._frames = deque([], maxlen=k)
-        shp = env.observation_space.shape
+
         self.observation_space = gym.spaces.Box(
-            low=0, high=255, shape=((shp[0] * k,) + shp[1:]), dtype=env.observation_space.dtype
+            low=0, high=255, shape=((k, *env.observation_space.shape)), dtype=env.observation_space.dtype
         )
 
     def reset(self):
-        obs = self.env.reset()
+        obs, info = self.env.reset()
         for _ in range(self._k):
             self._frames.append(obs)
-        return self._get_obs()
+        return self._get_obs(), info
 
     def step(self, action):
-        obs, reward, done, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = self.env.step(action)
         self._frames.append(obs)
-        return self._get_obs(), reward, done, info
+        return self._get_obs(), reward, terminated, truncated, info
 
     def _get_obs(self):
         assert len(self._frames) == self._k
-        return LazyFrames(list(self._frames))
+        return np.stack(self._frames, axis=0)
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    env = gym.make("dmc_distraction_cheetah_run_1-v1", channels_first=True, height=256, width=256, obs_type="pixels")
+    env = FTDObservationWrapper(
+        env=env,
+        config=FTDObservationWrapperConfig(
+            sam_config=MobileSAMV2Config(image_size=256, confidence_threshold=0.5),
+            add_original_frame=True,
+        ),
+    )
+    print(env.observation_space.shape)
+    obs1, _ = env.reset()
+    print(obs1.shape)
+
+    env = ResizeObservation(env, shape=(64, 64), is_channels_first=True)
+    print(env.observation_space.shape)
+    obs2, _, _, _, _ = env.step(env.action_space.sample())
+    print(obs2.shape)
+
+    # plot both images save plots
+    plt.subplot(1, 2, 1)
+    plt.imshow(obs1[-1].transpose(1, 2, 0))
+    plt.title("Original Observation")
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(obs2[-1].transpose(1, 2, 0))
+    plt.title("Resized Observation")
+
+    plt.savefig("observations.png")
+
+    env = FrameStack(env, k=4)
+    print(env.observation_space.shape)
+    obs3, _ = env.reset()
+    print(obs3.shape)
+
+    env = gym.make("dmc_distraction_cheetah_run_1-v1", channels_first=True, height=256, width=256, obs_type="pixels")
+    env = ResizeObservation(env, shape=(64, 64), is_channels_first=True)
+    env = FrameStack(env, k=4)
+    print(env.observation_space.shape)
+    obs4, _ = env.reset()
+    print(obs4.shape)

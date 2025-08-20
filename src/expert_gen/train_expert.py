@@ -60,16 +60,16 @@ def main():
     os.makedirs(vecnorm_path, exist_ok=True)
 
     # Training environment
-    train_env = DummyVecEnv([lambda: make_env(args.env_id, hparams['env_kwargs']) for _ in range(hparams["n_envs"])])
+    train_env = DummyVecEnv([lambda: make_env(args.env_id, hparams["env_kwargs"]) for _ in range(hparams["n_envs"])])
     train_env = VecMonitor(train_env, filename=os.path.join(run_path, "monitor.csv"))
     if hparams.get("normalize", False):
-        train_env = VecNormalize(venv=train_env, gamma=hparams["gamma"], **hparams['normalize_kwargs'])
+        train_env = VecNormalize(venv=train_env, gamma=hparams["gamma"], **hparams["normalize_kwargs"])
 
     # Evaluation environment
-    eval_env = DummyVecEnv([lambda: make_env(args.env_id, hparams['env_kwargs']) for _ in range(args.eval_envs)])
+    eval_env = DummyVecEnv([lambda: make_env(args.env_id, hparams["env_kwargs"]) for _ in range(args.eval_envs)])
     eval_env = VecMonitor(eval_env, filename=os.path.join(run_path, "eval_monitor.csv"))
     if hparams.get("normalize", False):
-        eval_env = VecNormalize(venv=eval_env, gamma=hparams["gamma"], **hparams['normalize_kwargs'])
+        eval_env = VecNormalize(venv=eval_env, gamma=hparams["gamma"], **hparams["normalize_kwargs"])
         eval_env.training = False
         eval_env.norm_reward = False
         eval_env.obs_rms = train_env.obs_rms

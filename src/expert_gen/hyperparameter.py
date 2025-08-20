@@ -22,13 +22,8 @@ HYPERPARAMETERS = {
             "activation_fn": nn.relu,
             "net_arch": {"pi": [256, 256], "vf": [256, 256]},
         },
-        "normalize_kwargs": {
-            "norm_obs": True,
-            "norm_reward": True
-        },
-        "env_kwargs": {
-            "action_repeat": 4
-        }
+        "normalize_kwargs": {"norm_obs": True, "norm_reward": True},
+        "env_kwargs": {"action_repeat": 4},
     },
     "dmc_hopper_run_1-v1": {
         "normalize": True,

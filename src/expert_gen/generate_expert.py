@@ -67,7 +67,7 @@ def generate_expert_dataset(
     expert_path: str,
     skill_level: str,
     save_to_gif: bool,
-    action_repeat: int
+    action_repeat: int,
 ):
     # Determine checkpoint
     checkpoints_dir = os.path.join(expert_path, "checkpoints")
