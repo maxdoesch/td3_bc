@@ -135,21 +135,24 @@ class TD3BC_Online(TD3BC):
 
 
 if __name__ == "__main__":
+    from td3_bc.policies.mlp import MlpPolicyConfig
+    
+    batch_size = 4
     obs_shape = (3,)
     action_dim = 4
     max_action = 1.0
-
-    cfg = TD3BC_Config()
+    
+    cfg = TD3BC_Config(policy_config=MlpPolicyConfig())
     agent = TD3BC(obs_shape, action_dim, max_action, cfg)
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     batch = {
-        "obs": torch.randn(32, 3).to(device),
-        "action": torch.randn(32, 4).to(device),
-        "next_obs": torch.randn(32, 3).to(device),
-        "reward": torch.randn(32, 1).to(device),
-        "not_done": torch.ones(32, 1).to(device),
+        "obs": torch.randn(batch_size, 3).to(device),
+        "action": torch.randn(batch_size, 4).to(device),
+        "next_obs": torch.randn(batch_size, 3).to(device),
+        "reward": torch.randn(batch_size, 1).to(device),
+        "not_done": torch.ones(batch_size, 1).to(device),
     }
 
     metrics = agent.train_step(batch)

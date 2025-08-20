@@ -1,5 +1,6 @@
 import os
 import argparse
+from typing import Dict
 import gymnasium as gym
 import wandb
 
@@ -28,8 +29,8 @@ class VecNormalizeCallback(BaseCallback):
         return True
 
 
-def make_env(env_id):
-    return gym.make(env_id, obs_type="state")
+def make_env(env_id, env_kwargs: Dict):
+    return gym.make(env_id, obs_type="state", **env_kwargs)
 
 
 def main():
@@ -37,7 +38,7 @@ def main():
     parser.add_argument("--env-id", type=str, default="dmc_cheetah_run_1-v1", help="Environment ID to train on.")
     parser.add_argument("--eval-envs", type=int, default=1, help="Number of evaluation environments.")
     parser.add_argument("--eval-freq", type=int, default=10_000, help="Evaluation frequency.")
-    parser.add_argument("--n-eval-episodes", type=int, default=5, help="Episodes per evaluation.")
+    parser.add_argument("--n-eval-episodes", type=int, default=10, help="Episodes per evaluation.")
     parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency.")
     parser.add_argument(
         "--output-dir", type=str, default="checkpoints/expert_models", help="Output directory for logs and models."
@@ -59,16 +60,16 @@ def main():
     os.makedirs(vecnorm_path, exist_ok=True)
 
     # Training environment
-    train_env = DummyVecEnv([lambda: make_env(args.env_id) for _ in range(hparams["n_envs"])])
+    train_env = DummyVecEnv([lambda: make_env(args.env_id, hparams['env_kwargs']) for _ in range(hparams["n_envs"])])
     train_env = VecMonitor(train_env, filename=os.path.join(run_path, "monitor.csv"))
     if hparams.get("normalize", False):
-        train_env = VecNormalize(train_env, norm_obs=True, norm_reward=True)
+        train_env = VecNormalize(venv=train_env, gamma=hparams["gamma"], **hparams['normalize_kwargs'])
 
     # Evaluation environment
-    eval_env = DummyVecEnv([lambda: make_env(args.env_id) for _ in range(args.eval_envs)])
+    eval_env = DummyVecEnv([lambda: make_env(args.env_id, hparams['env_kwargs']) for _ in range(args.eval_envs)])
     eval_env = VecMonitor(eval_env, filename=os.path.join(run_path, "eval_monitor.csv"))
     if hparams.get("normalize", False):
-        eval_env = VecNormalize(eval_env, norm_obs=True, norm_reward=False)
+        eval_env = VecNormalize(venv=eval_env, gamma=hparams["gamma"], **hparams['normalize_kwargs'])
         eval_env.training = False
         eval_env.norm_reward = False
         eval_env.obs_rms = train_env.obs_rms
