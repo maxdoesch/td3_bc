@@ -107,6 +107,7 @@ class TD3BC_FTD(TD3BC_Base):
         max_action: float,
         cfg: Optional[TD3BC_FTD_Config] = None,
         device: str | None = None,
+        **policy_kwargs,
     ):
         if cfg is None:
             cfg = TD3BC_FTD_Config()
@@ -138,7 +139,9 @@ class TD3BC_FTD(TD3BC_Base):
 
         # === Layers ===
 
-        self.actor, self.critic = policies.get_policy(obs_shape, action_dim, max_action, self.device, cfg.policy_config)
+        self.actor, self.critic = policies.get_policy(
+            obs_shape, action_dim, max_action, self.device, cfg.policy_config, **policy_kwargs
+        )
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
 
         # === Auxiliary Predictors ===
@@ -289,10 +292,10 @@ class TD3BC_FTD(TD3BC_Base):
                 metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
 
         if self.log_img_freq != 0 and self.total_it % self.log_img_freq == 0:
-            metrics["train/raw_images"] = wandb.Image(batch["obs"][0][-3:])
-            metrics["train/ftd_images"] = wandb.Image(
-                self.critic.encoder.shared_ftd_layers.select_image(batch["obs"][0])
-            )
+            # batch['obs'][0] can be (C, H, W) or (R, C, H, W) or (F, C, H, W) or (F, R, C, H, W) flatten such that it results in (_, H, W)
+            obs = batch["obs"].flatten(start_dim=1, end_dim=-3)[0]
+            metrics["train/raw_images"] = wandb.Image(obs[-3:])
+            metrics["train/ftd_images"] = wandb.Image(self.critic.encoder.shared_ftd_layers.select_image(obs))
 
         metrics["train/time"] = time.time() - start_time
 

@@ -30,19 +30,28 @@ def combine_stacked_frames(observation: np.ndarray) -> np.ndarray:
 
 
 def uncombine_stacked_frames(observation: np.ndarray) -> np.ndarray:
+    """
+    Convert horizontally stacked RGB frames into channel-first format.
+
+    Input:
+        (H, W, C)  → Output: (num_regions, 3, H, W/num_regions)
+        (N, H, W, C) → Output: (N, num_regions, 3, H, W/num_regions)
+
+    Assumes W = num_regions * frame_width and C = 3.
+    """
     if len(observation.shape) == 3:
         H, W, C = observation.shape
-        num_channels = W // H
+        num_regions = W // H
 
-        observation = observation.reshape(H, num_channels, W // num_channels, 3)
-        observation = observation.transpose(1, 3, 0, 2)  # (num_channels, 3, H, W // num_channels)
-        observation = observation.reshape(num_channels * 3, H, W // num_channels)
+        observation = observation.reshape(H, num_regions, W // num_regions, 3)
+        observation = observation.transpose(1, 3, 0, 2)  # (num_regions, 3, H, W // num_regions)
+        observation = observation.reshape(num_regions * 3, H, W // num_regions)
     elif len(observation.shape) == 4:
         N, H, W, C = observation.shape
-        num_channels = W // H
+        num_regions = W // H
 
-        observation = observation.reshape(N, H, num_channels, W // num_channels, 3)
-        observation = observation.transpose(0, 2, 4, 1, 3)  # (N, num_channels, 3, H, W // num_channels)
-        observation = observation.reshape(N, num_channels * 3, H, W // num_channels)
+        observation = observation.reshape(N, H, num_regions, W // num_regions, 3)
+        observation = observation.transpose(0, 2, 4, 1, 3)  # (N, num_regions, 3, H, W // num_regions)
+        observation = observation.reshape(N, num_regions * 3, H, W // num_regions)
 
     return observation

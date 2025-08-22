@@ -32,10 +32,15 @@ class ReplayBuffer:
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
         self.action_dim = action_dim
 
-        self.is_image_obs = len(self.obs_shape) in {2, 3}
+        self.is_image_obs = len(self.obs_shape) >= 2
         self.max_size = (
             int(1e5) if self.is_image_obs else max_size
         )  # hack to avoid MemoryError with large image buffers
+
+        self.frame_stack = 1
+        if self.is_image_obs and len(self.obs_shape) >= 4:
+            self.frame_stack = self.obs_shape[0]
+            self.obs_shape = self.obs_shape[1:] if self.frame_stack == 1 else self.obs_shape
 
         obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
         self.obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device="cpu")
@@ -154,6 +159,26 @@ class ReplayBuffer:
             "not_done": not_done,
         }
 
+    def _get_stacked_observations(self, obs: np.array) -> Tuple[np.ndarray, np.ndarray]:
+        if self.frame_stack > 1:
+            obs_padded = np.concatenate(
+                [np.repeat(obs[:1], self.frame_stack - 1, axis=0), obs], axis=0
+            )  # -> (T+1+F-1, C, H, W) = (T+F, C, H, W)
+
+            obs = np.lib.stride_tricks.sliding_window_view(
+                obs_padded[:-1], window_shape=self.frame_stack, axis=0
+            )  # (T, F, C, H, W)
+            obs = np.moveaxis(obs, -1, 1)
+            next_obs = np.lib.stride_tricks.sliding_window_view(
+                obs_padded[1:], window_shape=self.frame_stack, axis=0
+            )  # (T, F, C, H, W)
+            next_obs = np.moveaxis(next_obs, -1, 1)
+        else:
+            next_obs = obs[1:]  # (T, C, H, W)
+            obs = obs[:-1]  # (T, C, H, W)
+
+        return obs, next_obs
+
     def convert_dict(self, dict_dataset):
         """
         Populate the replay buffer with transitions from a dictionary dataset.
@@ -166,18 +191,19 @@ class ReplayBuffer:
         """
 
         for episode in range(len(dict_dataset["acts"])):
-            transition = {
-                "obs": np.array(dict_dataset["obs"][episode][:-1]),
-                "action": np.array(dict_dataset["acts"][episode]),
-                "next_obs": np.array(dict_dataset["obs"][episode][1:]),
-                "reward": np.array(dict_dataset["rews"][episode]),
-                "done": np.concatenate(
-                    [
-                        np.zeros_like(dict_dataset["rews"][episode][:-1]),
-                        np.ones_like(dict_dataset["rews"][episode][-1:]),
-                    ]
-                ),
-            }
+            obs = np.array(dict_dataset["obs"][episode])
+            acts = np.array(dict_dataset["acts"][episode])
+            rews = np.array(dict_dataset["rews"][episode])
+            done = np.concatenate(
+                [
+                    np.zeros_like(dict_dataset["rews"][episode][:-1]),
+                    np.ones_like(dict_dataset["rews"][episode][-1:]),
+                ]
+            )
+
+            obs, next_obs = self._get_stacked_observations(obs)
+
+            transition = {"obs": obs, "action": acts, "next_obs": next_obs, "reward": rews, "done": done}
 
             self.add(**transition)
 
@@ -194,10 +220,11 @@ class ReplayBuffer:
 
         for episode in dataset.iterate_episodes():
             observations = utils.uncombine_stacked_frames(episode.observations)
+            obs, next_obs = self._get_stacked_observations(observations)
             transition = {
-                "obs": observations[:-1],
+                "obs": obs,
                 "action": episode.actions,
-                "next_obs": observations[1:],
+                "next_obs": next_obs,
                 "reward": episode.rewards,
                 "done": episode.terminations,
             }
@@ -340,6 +367,8 @@ if __name__ == "__main__":
     print("Mean:", mean)
     print("Std:", std)
 
+    print("---------------------------------------------------------")
+
     obs_shape = (32, 32, 3)
     buffer = ReplayBuffer(obs_shape, action_dim, max_size=int(1e6))
     print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
@@ -357,3 +386,46 @@ if __name__ == "__main__":
 
     mean, std = buffer.compute_dataset_statistics()
     buffer.set_dataset_statistics(mean, std)
+
+    batch = buffer.sample(batch_size=2)
+    print("Sampled batch:")
+    for key, value in batch.items():
+        print(f"{key}: {value.shape}")
+
+    print("---------------------------------------------------------")
+
+    frame_stack = 3
+    obs_shape = (3, 64, 64)
+    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5))
+    print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
+
+    episode_length = 1000
+    dict_dataset = {
+        "obs": [
+            np.broadcast_to(
+                np.arange(episode_length + 1).reshape(-1, *([1] * len(obs_shape))), (episode_length + 1, *obs_shape)
+            )
+            for _ in range(episodes)
+        ],
+        "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
+        "rews": [np.random.randn(episode_length) for _ in range(episodes)],
+        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
+    }
+    buffer.convert_dict(dict_dataset)
+    print("Buffer size after converting dictionary dataset with complex shapes:", buffer.size)
+    print("Buffer pointer after converting dictionary dataset with complex shapes:", buffer.ptr)
+
+    mean, std = buffer.compute_dataset_statistics()
+    buffer.set_dataset_statistics(mean, std)
+
+    batch = buffer.sample(batch_size=256)
+    print("Sampled batch:")
+    for key, value in batch.items():
+        print(f"{key}: {value.shape}")
+
+    assert torch.allclose(255 * batch["obs"][0] + 1, 255 * batch["next_obs"][0]), (
+        "Observation and next observation do not match"
+    )
+    assert torch.allclose(
+        torch.stack([255 * batch["obs"][0, 0] + i for i in range(frame_stack)]), 255 * batch["obs"][0]
+    ), "Stacked observations do not match expected values"

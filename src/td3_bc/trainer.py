@@ -16,6 +16,7 @@ import numpy as np
 from tqdm import tqdm
 import wandb
 
+from dmc_env.wrappers import FrameStack
 from td3_bc.buffer import ReplayBuffer
 import td3_bc.algorithms.td3_bc_vanilla as td3_bc
 import td3_bc.algorithms.td3_bc_ftd as td3_bc_ftd
@@ -96,6 +97,7 @@ class TrainerConfig:
     env_name: Optional[str] = None
     num_envs: Optional[int] = 1
     env_kwargs: Dict = field(default_factory=dict)
+    frame_stack: int = 1
 
     @property
     def dataset_statistics_path(self) -> str:
@@ -183,9 +185,18 @@ class Trainer(ABC):
         if envs:
             self.envs = envs
         elif cfg.env_name:
-            self.envs = gym.make_vec(
-                self.cfg.env_name, num_envs=self.cfg.num_envs, vectorization_mode="sync", **self.cfg.env_kwargs
-            )
+            if self.cfg.frame_stack > 1:
+                self.envs = gym.make_vec(
+                    self.cfg.env_name,
+                    num_envs=self.cfg.num_envs,
+                    vectorization_mode="sync",
+                    wrappers=[lambda env: FrameStack(env, k=self.cfg.frame_stack)],
+                    **self.cfg.env_kwargs,
+                )
+            else:
+                self.envs = gym.make_vec(
+                    self.cfg.env_name, num_envs=self.cfg.num_envs, vectorization_mode="sync", **self.cfg.env_kwargs
+                )
         else:
             raise ValueError("No environment specified.")
 
@@ -233,6 +244,7 @@ class Trainer(ABC):
             train_steps=self.cfg.train_steps,
             cfg=self.cfg.train_mode.td3_config,
             device=self.cfg.device,
+            frame_stack=self.cfg.frame_stack,
         )
 
         pretrain_path = None

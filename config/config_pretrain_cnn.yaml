@@ -1,0 +1,46 @@
+train_steps: 1000000
+eval_freq: 5000
+eval_episodes: 10
+checkpoint_freq: 25000
+batch_size: 128
+
+seeds: 42
+n_seeds: 5
+
+wandb_project: td3-bc
+checkpoint_dir: ./checkpoints
+
+#experiment_name: <optional>
+
+dataset_path: dmc/dmc_background_cheetah_run_1-v1-action_repeat_4/expert-v0
+
+env_name: dmc_background_cheetah_run_1-v1
+num_envs: 1
+env_kwargs:
+  channels_first: True
+  height: 64
+  width: 64
+  action_repeat: 4
+frame_stack: 3
+
+train_mode:
+  type: pretrain
+
+  td3_config:
+    discount: 0.99
+    tau: 0.005
+    policy_noise: 0.2
+    noise_clip: 0.5
+    alpha: 0.4
+    actor_lr: 3e-4
+    critic_lr: 3e-4
+    policy_freq: 2
+
+    policy_config:
+      type: cnn
+      encoder_hidden_dim: 32
+
+      critic_hidden_dim: 256
+      critic_n_layers: 1
+      actor_hidden_dim: 256
+      actor_n_layers: 1

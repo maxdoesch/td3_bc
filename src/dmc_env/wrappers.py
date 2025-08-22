@@ -168,15 +168,15 @@ class FrameStack(gym.Wrapper):
             low=0, high=255, shape=((k, *env.observation_space.shape)), dtype=env.observation_space.dtype
         )
 
-    def reset(self):
-        obs, info = self.env.reset()
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
         for _ in range(self._k):
-            self._frames.append(obs)
+            self._frames.appendleft(obs)
         return self._get_obs(), info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        self._frames.append(obs)
+        self._frames.appendleft(obs)
         return self._get_obs(), reward, terminated, truncated, info
 
     def _get_obs(self):

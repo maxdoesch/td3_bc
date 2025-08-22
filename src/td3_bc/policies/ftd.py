@@ -26,10 +26,6 @@ class SharedFTDLayersConfig:
     attn_selector_cfg: Optional[ImageAttentionSelectorConfig] = field(default_factory=ImageAttentionSelectorConfig)
     feature_extractor_cfg: FeatureExtractorConfig = field(default_factory=FeatureExtractorConfig)
 
-    num_regions: int = 10  # Maximum number of segmented regions
-    num_channels: int = 3  # Number of input channels
-    num_stack: int = 1  # Number of frames stacked together as a single observation
-
 
 @dataclass
 class FTDActorConfig:
@@ -92,20 +88,18 @@ class RLProjection(nn.Module):
 
 
 class FeatureExtractorCNN(nn.Module):
-    def __init__(self, obs_shape: Tuple[int, int, int], in_channels: int, stack_num: int, cfg: FeatureExtractorConfig):
+    def __init__(self, in_channels: int, frame_stack: int, cfg: FeatureExtractorConfig):
         super().__init__()
-        assert len(obs_shape) == 3
 
-        self.obs_shape = obs_shape  # (C, H, W)
         self.in_channels = in_channels
-        self.stack_num = stack_num
+        self.frame_stack = frame_stack
 
         self.conv_layers = cfg.conv_layers
         self.conv_filters = cfg.conv_filters
 
         self.feature_extractor = [
             nn.Conv2d(
-                in_channels=self.stack_num * self.in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2
+                in_channels=self.frame_stack * self.in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2
             )
         ]
         for _ in range(1, self.conv_layers):
@@ -127,27 +121,27 @@ class FeatureExtractorCNN(nn.Module):
 class ImageAttentionSelectorLayers(nn.Module):
     def __init__(
         self,
-        obs_shape: Tuple[int, int, int],
+        input_shape: Tuple[int, ...],
         region_num: int,
         in_channels: int,
-        stack_num: int,
+        frame_stack: int,
         cfg: ImageAttentionSelectorConfig,
     ):
         super().__init__()
 
-        self.obs_shape = obs_shape
+        self.input_shape = input_shape
         self.region_num = region_num
         self.in_channels = in_channels
-        self.stack_num = stack_num
+        self.frame_stack = frame_stack
 
         self.conv_layers = cfg.conv_layers
         self.conv_filters = cfg.conv_filters
         self.attention_embed_dim = cfg.attention_embed_dim
         self.attention_heads = cfg.attention_heads
 
-        reduced_img_height = obs_shape[1] // 2
+        reduced_img_height = input_shape[1] // 2
         self.layers = [
-            nn.Conv2d(in_channels=in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2, padding=1)
+            nn.Conv2d(in_channels=self.in_channels, out_channels=self.conv_filters, kernel_size=3, stride=2, padding=1)
         ]
         for _ in range(1, self.conv_layers):
             self.layers.append(nn.ReLU())
@@ -171,10 +165,10 @@ class ImageAttentionSelectorLayers(nn.Module):
         # no 'v' network, we use the raw input images as the values
 
     def forward(self, x, return_logits=False, return_head_logits=False, return_all=False):
-        # (batch_size, stack_num * (region_num + 1) * channels , height, width)
+        # (batch_size, frame_stack * region_num * channels , height, width)
         # Last region is the whole frame
         B, _, H, W = x.shape
-        S, R, C = self.stack_num, self.region_num + 1, self.in_channels
+        S, R, C = self.frame_stack, self.region_num, self.in_channels
         x = x.reshape(-1, C, H, W)
 
         mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
@@ -213,44 +207,65 @@ class ImageAttentionSelectorLayers(nn.Module):
 
 
 class SharedFTDLayers(nn.Module):
-    def __init__(self, obs_shape: tuple[int, int, int], cfg: SharedFTDLayersConfig):
+    def __init__(self, obs_shape: tuple[int, ...], frame_stack: int, cfg: SharedFTDLayersConfig):
         super().__init__()
-
         self.cfg = cfg
+
+        H, W = obs_shape[-2:]
+        nd = len(obs_shape)
+
+        if nd == 3:  # (C, H, W)
+            C, _, _ = obs_shape
+            self.num_channels, region_num, eff_channels = 3, C // 3, C
+        elif nd == 4:
+            N, C, _, _ = obs_shape
+            if frame_stack > 1:  # (N, C, H, W)
+                assert frame_stack == N
+                self.num_channels, region_num, eff_channels = C, 1, N * C
+            else:  # (R, C, H, W)
+                self.num_channels, region_num, eff_channels = C, N, N * C
+        elif nd == 5:  # (N, R, C, H, W)
+            N, R, C, _, _ = obs_shape
+            assert frame_stack == N
+            self.num_channels, region_num, eff_channels = C, R, N * R * C
+        else:
+            raise ValueError(f"Unsupported obs_shape {obs_shape}")
+
+        self.input_shape = (eff_channels, H, W)
 
         self.image_attention_selector = (
             ImageAttentionSelectorLayers(
-                obs_shape=obs_shape,
-                region_num=cfg.num_regions,
-                in_channels=cfg.num_channels,
-                stack_num=cfg.num_stack,
+                input_shape=self.input_shape,
+                region_num=region_num,
+                in_channels=self.num_channels,
+                frame_stack=frame_stack,
                 cfg=cfg.attn_selector_cfg,
             )
             if cfg.attn_selector_cfg
             else nn.Identity()
         )
 
-        self.feature_exctractor_cnn = FeatureExtractorCNN(
-            obs_shape=obs_shape, in_channels=cfg.num_channels, stack_num=cfg.num_stack, cfg=cfg.feature_extractor_cfg
+        self.feature_extractor_cnn = FeatureExtractorCNN(
+            in_channels=self.num_channels, frame_stack=frame_stack, cfg=cfg.feature_extractor_cfg
         )
-
         self.out_dim = get_out_shape(
-            in_shape=obs_shape,
+            in_shape=self.input_shape,
             module=nn.Sequential(
                 self.image_attention_selector,
-                self.feature_exctractor_cnn,
+                self.feature_extractor_cnn,
             ),
         )[0]
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        obs = torch.reshape(obs, (-1, *self.input_shape))
         obs = self.image_attention_selector(obs)
-        obs = self.feature_exctractor_cnn(obs)
+        obs = self.feature_extractor_cnn(obs)
         return obs
 
     def select_image(self, obs: torch.Tensor):
         with torch.no_grad():
             obs = self.image_attention_selector(obs.unsqueeze(0))  # Add batch dimension
-            obs = obs.squeeze()[-self.cfg.num_channels :]
+            obs = obs.squeeze()[-self.num_channels :]
             obs = obs.permute(1, 2, 0)  # Convert to (H, W, C) format
             obs = (255 * obs).to(torch.uint8)  # Convert to uint8 format
 
@@ -339,7 +354,8 @@ class FTDCritic(BaseCritic):
 
 def main():
     # Example usage
-    obs_shape = (33, 256, 256)
+    frame_stack = 4
+    obs_shape = (frame_stack, 11, 3, 256, 256)
     action_dim = 4
     max_action = 1.0
 
@@ -347,7 +363,7 @@ def main():
 
     # Create actor and critic
     config = FtdPolicyConfig()
-    encoder = SharedFTDLayers(obs_shape, config.shared_layers_cfg)
+    encoder = SharedFTDLayers(obs_shape, frame_stack, config.shared_layers_cfg)
     actor = FTDActor(encoder, obs_shape, action_dim, max_action, config.actor_cfg)
     critic = FTDCritic(encoder, obs_shape, action_dim, config.critic_cfg)
 

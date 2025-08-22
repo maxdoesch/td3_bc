@@ -44,10 +44,6 @@ train_mode:
           conv_layers: 11
           conv_filters: 32
 
-        num_regions: 10
-        num_channels: 3
-        num_stack: 1
-
       actor_cfg:
         rl_projection_dim: 100
         hidden_dim: 256

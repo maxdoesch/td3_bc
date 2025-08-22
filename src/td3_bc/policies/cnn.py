@@ -21,9 +21,14 @@ class CnnPolicyConfig(PolicyConfig):
 class CnnEncoder(nn.Module):
     def __init__(self, obs_shape: Tuple[int, int, int], hidden_dim: int):
         super().__init__()
-        c = obs_shape[2]
+
+        self.input_shape = (
+            int(torch.tensor(obs_shape[:-2]).prod().item()),
+            *obs_shape[-2:],
+        )
+
         self.encoder = nn.Sequential(
-            nn.Conv2d(c, hidden_dim, kernel_size=3, stride=2, padding=1),
+            nn.Conv2d(self.input_shape[0], hidden_dim, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
             nn.Conv2d(hidden_dim, hidden_dim * 2, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
@@ -32,11 +37,11 @@ class CnnEncoder(nn.Module):
 
         # Calculate output dimension
         with torch.no_grad():
-            dummy_input = torch.zeros(1, *obs_shape).permute(0, 3, 1, 2)
+            dummy_input = torch.randn((1, *self.input_shape), device=next(self.parameters()).device)
             self.output_dim = self.encoder(dummy_input).shape[1]
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        obs = obs.permute(0, 3, 1, 2)  # (B, C, H, W)
+        obs = torch.reshape(obs, (-1, *self.input_shape))
         return self.encoder(obs)
 
 
