@@ -79,21 +79,14 @@ class CnnCritic(BaseCritic):
         super().__init__(obs_shape, action_dim)
         self.encoder = encoder
 
-        self.action_encoder1 = nn.Sequential(
-            nn.Linear(action_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim), nn.ReLU()
-        )
-        self.action_encoder2 = nn.Sequential(
-            nn.Linear(action_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, hidden_dim), nn.ReLU()
-        )
-
         self.critic1 = nn.Sequential(
-            nn.Linear(encoder.output_dim + hidden_dim, hidden_dim),
+            nn.Linear(encoder.output_dim + action_dim, hidden_dim),
             nn.ReLU(),
             *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
             nn.Linear(hidden_dim, 1),
         )
         self.critic2 = nn.Sequential(
-            nn.Linear(encoder.output_dim + hidden_dim, hidden_dim),
+            nn.Linear(encoder.output_dim + action_dim, hidden_dim),
             nn.ReLU(),
             *[layer for _ in range(n_layers - 1) for layer in (nn.Linear(hidden_dim, hidden_dim), nn.ReLU())],
             nn.Linear(hidden_dim, 1),
@@ -103,14 +96,16 @@ class CnnCritic(BaseCritic):
         return self.q1(obs, action), self.q2(obs, action)
 
     def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        obs_feat = self.encoder(obs)
-        act_feat = self.action_encoder1(action)
-        return self.critic1(torch.cat([obs_feat, act_feat], dim=-1))
+        with torch.no_grad():    
+            obs_feat = self.encoder(obs)
+
+        return self.critic1(torch.cat([obs_feat, action], dim=-1))
 
     def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        obs_feat = self.encoder(obs)
-        act_feat = self.action_encoder2(action)
-        return self.critic2(torch.cat([obs_feat, act_feat], dim=-1))
+        with torch.no_grad():
+            obs_feat = self.encoder(obs)
+
+        return self.critic2(torch.cat([obs_feat, action], dim=-1))
 
 
 if __name__ == "__main__":
