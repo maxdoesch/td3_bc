@@ -126,7 +126,7 @@ class TD3BC_Base(BaseAgent):
         # Compute actor loss
         pi = self.actor(obs)
         q1_value = self.critic.q1(obs, pi)
-        q1_value_norm = q1_value / q1_value.abs().mean().detach()
+        q1_value_norm = q1_value / (q1_value.abs().mean().detach() + 1e-9)
 
         bc_loss = functional.mse_loss(pi, action)
         actor_loss = -q1_value_norm.mean() + self.alpha * bc_loss

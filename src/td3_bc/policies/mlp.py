@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Union, Tuple
 
 from .policy import PolicyConfig, BaseActor, BaseCritic
+from .utils import weight_init
 
 
 @PolicyConfig.register_subclass("mlp")
@@ -36,6 +37,8 @@ class MlpActor(BaseActor):
             ]
         )
 
+        self.model.apply(weight_init)
+
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         return self.model(obs) * self.max_action
 
@@ -56,6 +59,7 @@ class MlpCritic(BaseCritic):
                 nn.Linear(hidden_dim, 1),
             ]
         )
+        self.critic1.apply(weight_init)
 
         self.critic2 = nn.Sequential(
             *[
@@ -65,20 +69,13 @@ class MlpCritic(BaseCritic):
                 nn.Linear(hidden_dim, 1),
             ]
         )
+        self.critic2.apply(weight_init)
 
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        sa = torch.cat([obs, action], dim=-1)
-        q1 = self.critic1(sa)
-        q2 = self.critic2(sa)
-        return q1, q2
+        return self.critic1(torch.cat([obs, action], dim=-1)), self.critic2(torch.cat([obs, action], dim=-1))
 
     def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        sa = torch.cat([obs, action], dim=-1)
-        return self.critic1(sa)
-
-    def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        sa = torch.cat([obs, action], dim=-1)
-        return self.critic2(sa)
+        return self.critic1(torch.cat([obs, action], dim=-1))
 
 
 if __name__ == "__main__":

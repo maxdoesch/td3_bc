@@ -227,7 +227,7 @@ if __name__ == "__main__":
     obs4, _ = env.reset()
     print(obs4.shape)
 
-    print('--------------------------------')
+    print("--------------------------------")
 
     class DummyEnv(gym.Env):
         def __init__(self):
@@ -244,7 +244,7 @@ if __name__ == "__main__":
         def step(self, action):
             self.idx += 1
             return self.idx * np.ones((3, 64, 64), dtype=np.uint8), 0, False, False, {}
-        
+
     env = DummyEnv()
     env = FrameStack(env, k=4)
     env.reset()

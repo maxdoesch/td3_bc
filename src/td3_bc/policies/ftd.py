@@ -5,6 +5,7 @@ from typing import Tuple, Union, Optional
 
 from .policy import PolicyConfig, BaseActor, BaseCritic
 from .mlp import MlpActor, MlpCritic
+from .utils import get_out_shape, weight_init
 
 
 @dataclass
@@ -50,28 +51,6 @@ class FtdPolicyConfig(PolicyConfig):
 
     actor_cfg: FTDActorConfig = field(default_factory=FTDActorConfig)
     critic_cfg: FTDCriticConfig = field(default_factory=FTDCriticConfig)
-
-
-def get_out_shape(in_shape: Tuple[int, ...], module: nn.Module) -> Tuple[int, ...]:
-    x = torch.randn((1, *in_shape), device=next(module.parameters()).device)
-    return module(x)[0].shape
-
-
-def weight_init(m):
-    """Custom weight init for Conv2D and Linear layers"""
-    if isinstance(m, nn.Linear):
-        nn.init.orthogonal_(m.weight.data)
-        if hasattr(m.bias, "data"):
-            m.bias.data.fill_(0.0)
-    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
-        assert m.weight.size(2) == m.weight.size(3)
-        m.weight.data.fill_(0.0)
-        if hasattr(m.bias, "data"):
-            m.bias.data.fill_(0.0)
-        mid = m.weight.size(2) // 2
-        gain = nn.init.calculate_gain("relu")
-        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
 
 
 class RLProjection(nn.Module):
@@ -346,10 +325,6 @@ class FTDCritic(BaseCritic):
     def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         proj = self.encoder(obs)
         return self.critic.q1(proj, action)
-
-    def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        proj = self.encoder(obs)
-        return self.critic.q2(proj, action)
 
 
 def main():

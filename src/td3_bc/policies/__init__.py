@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Tuple, Union
+from typing import Callable, Tuple, Union
 
 from .policy import PolicyConfig, BaseActor, BaseCritic
 from .mlp import MlpPolicyConfig, MlpActor, MlpCritic
@@ -47,22 +47,9 @@ def build_mlp_policy(
 def build_cnn_policy(
     obs_shape: Tuple[int, ...], action_dim: int, max_action: float, device: str, cfg: CnnPolicyConfig, **policy_kwargs
 ) -> Tuple[BaseActor, BaseCritic]:
-    shared_encoder = CnnEncoder(obs_shape, hidden_dim=cfg.encoder_hidden_dim).to(device)
-    actor = CnnActor(
-        shared_encoder,
-        obs_shape,
-        action_dim,
-        hidden_dim=cfg.actor_hidden_dim,
-        n_layers=cfg.actor_n_layers,
-        max_action=max_action,
-    ).to(device)
-    critic = CnnCritic(
-        shared_encoder,
-        obs_shape,
-        action_dim,
-        hidden_dim=cfg.critic_hidden_dim,
-        n_layers=cfg.critic_n_layers,
-    ).to(device)
+    shared_encoder = CnnEncoder(obs_shape, cfg.cnn_encoder_cfg).to(device)
+    actor = CnnActor(shared_encoder, obs_shape, action_dim, max_action, cfg.actor_cfg).to(device)
+    critic = CnnCritic(shared_encoder, obs_shape, action_dim, cfg.critic_cfg).to(device)
     return actor, critic
 
 

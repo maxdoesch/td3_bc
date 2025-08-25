@@ -21,7 +21,7 @@ env_kwargs:
   height: 64
   width: 64
   action_repeat: 4
-frame_stack: 4
+frame_stack: 3
 
 train_mode:
   type: pretrain
@@ -38,9 +38,17 @@ train_mode:
 
     policy_config:
       type: cnn
-      encoder_hidden_dim: 128
+      
+      cnn_encoder_cfg:
+        cnn_filter_dims: [32, 64, 128, 256]
+        cnn_kernel_strides: [2, 2, 1, 1]
 
-      critic_hidden_dim: 256
-      critic_n_layers: 1
-      actor_hidden_dim: 256
-      actor_n_layers: 1
+      actor_cfg:
+        linear_trunk_dim: 64
+        hidden_dim: 256
+        n_layers: 2
+
+      critic_cfg:
+        linear_trunk_dim: 64
+        hidden_dim: 256
+        n_layers: 2

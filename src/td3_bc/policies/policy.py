@@ -33,12 +33,14 @@ class BaseCritic(nn.Module, ABC):
 
     @abstractmethod
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass for updating the TD3 critic loss.
+        """
         pass
 
     @abstractmethod
     def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
-        pass
-
-    @abstractmethod
-    def q2(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for updating the TD3 actor loss.
+        """
         pass
