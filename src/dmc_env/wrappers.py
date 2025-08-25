@@ -171,12 +171,12 @@ class FrameStack(gym.Wrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
         for _ in range(self._k):
-            self._frames.appendleft(obs)
+            self._frames.append(obs)
         return self._get_obs(), info
 
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        self._frames.appendleft(obs)
+        self._frames.append(obs)
         return self._get_obs(), reward, terminated, truncated, info
 
     def _get_obs(self):
@@ -226,3 +226,29 @@ if __name__ == "__main__":
     print(env.observation_space.shape)
     obs4, _ = env.reset()
     print(obs4.shape)
+
+    print('--------------------------------')
+
+    class DummyEnv(gym.Env):
+        def __init__(self):
+            super().__init__()
+            self.observation_space = gym.spaces.Box(low=0, high=255, shape=(3, 64, 64), dtype=np.uint8)
+            self.action_space = gym.spaces.Discrete(4)
+
+            self.idx = 0
+
+        def reset(self):
+            self.idx = 0
+            return np.zeros((3, 64, 64), dtype=np.uint8), {}
+
+        def step(self, action):
+            self.idx += 1
+            return self.idx * np.ones((3, 64, 64), dtype=np.uint8), 0, False, False, {}
+        
+    env = DummyEnv()
+    env = FrameStack(env, k=4)
+    env.reset()
+
+    for i in range(10):
+        obs, _, _, _, _ = env.step(0)
+        print(obs[:, 0, 0, 0])
