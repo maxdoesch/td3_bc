@@ -112,7 +112,7 @@ class CnnCritic(BaseCritic):
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
             obs_feat = self.encoder(obs)
-            obs_feat = self.linear_trunk_layers(obs_feat)  # do not optimize trunk layers in critic loss
+        obs_feat = self.linear_trunk_layers(obs_feat)  # do not optimize trunk layers in critic loss
 
         return self.critic(obs_feat, action)
 
