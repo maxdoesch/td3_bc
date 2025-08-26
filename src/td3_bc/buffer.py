@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+import torchvision.transforms as T
 import json
 import minari
 import logging
@@ -20,6 +21,7 @@ class ReplayBuffer:
         action_dim: int,
         max_size: int = int(1e6),
         device: Optional[str] = None,
+        augmentations: bool = True,
     ):
         self.max_size = max_size
         self.ptr = 0
@@ -61,6 +63,15 @@ class ReplayBuffer:
         )
 
         self._staging = None  # for async H2D transfers
+
+        if self.is_image_obs and augmentations:
+            self.augmentations = T.Compose(
+                [
+                    T.RandomCrop(self.obs_shape[-2:], padding=4, padding_mode="constant"),
+                ]
+            )
+        else:
+            self.augmentations = None
 
     def add(self, obs: np.ndarray, action: np.ndarray, next_obs: np.ndarray, reward: np.ndarray, done: np.ndarray):
         """
@@ -147,6 +158,10 @@ class ReplayBuffer:
         action = self._staging["action"].to(self.device, non_blocking=True)
         reward = self._staging["reward"].to(self.device, non_blocking=True)
         not_done = self._staging["not_done"].to(self.device, non_blocking=True)
+
+        if self.is_image_obs and self.augmentations:
+            obs = self.augmentations(obs)
+            next_obs = self.augmentations(next_obs)
 
         obs_norm = normalize(obs, self.obs_mean, self.obs_std)
         next_obs_norm = normalize(next_obs, self.obs_mean, self.obs_std)
@@ -396,7 +411,7 @@ if __name__ == "__main__":
 
     frame_stack = 3
     obs_shape = (3, 64, 64)
-    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5))
+    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5), augmentations=False)
     print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
 
     episode_length = 1000
