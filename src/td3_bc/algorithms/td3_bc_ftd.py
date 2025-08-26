@@ -156,8 +156,13 @@ class TD3BC_FTD(TD3BC_Base):
 
         # === Optimizers ===
 
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
+        self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
+        self.actor_optimizer = torch.optim.Adam(
+            list(self.actor.actor_loss_parameters) + list(self.critic.actor_loss_parameters), lr=cfg.actor_lr
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            list(self.critic.critic_loss_parameters) + list(self.actor.critic_loss_parameters), lr=cfg.critic_lr
+        )
         self.reward_predictor_optimizer = torch.optim.Adam(self.reward_predictor.parameters(), lr=cfg.predictors_lr)
         self.inverse_dynamic_predictor_optimizer = torch.optim.Adam(
             self.inverse_dynamic_predictor.parameters(), lr=cfg.predictors_lr
@@ -295,7 +300,7 @@ class TD3BC_FTD(TD3BC_Base):
             # batch['obs'][0] can be (C, H, W) or (R, C, H, W) or (F, C, H, W) or (F, R, C, H, W) flatten such that it results in (_, H, W)
             obs = batch["obs"].flatten(start_dim=1, end_dim=-3)[0]
             metrics["train/raw_images"] = wandb.Image(obs[-3:])
-            metrics["train/ftd_images"] = wandb.Image(self.critic.encoder.shared_ftd_layers.select_image(obs))
+            metrics["train/ftd_images"] = wandb.Image(self.actor.encoder.select_image(obs))
 
         metrics["train/time"] = time.time() - start_time
 

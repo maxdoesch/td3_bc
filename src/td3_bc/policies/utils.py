@@ -23,3 +23,30 @@ def weight_init(m):
         mid = m.weight.size(2) // 2
         gain = nn.init.calculate_gain("relu")
         nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
+
+
+def identify_obs_shape(obs_shape: Tuple[int, ...], frame_stack: int) -> Tuple:
+    H, W = obs_shape[-2:]
+    nd = len(obs_shape)
+
+    if nd == 3:  # (C, H, W)
+        C, _, _ = obs_shape
+        assert frame_stack == 1
+        num_channels, region_num, eff_channels = 3, C // 3, C
+    elif nd == 4:
+        N, C, _, _ = obs_shape
+        if frame_stack > 1:  # (N, C, H, W)
+            assert frame_stack == N
+            num_channels, region_num, eff_channels = C, 1, N * C
+        else:  # (R, C, H, W)
+            num_channels, region_num, eff_channels = C, N, N * C
+    elif nd == 5:  # (N, R, C, H, W)
+        N, R, C, _, _ = obs_shape
+        assert frame_stack == N
+        num_channels, region_num, eff_channels = C, R, N * R * C
+    else:
+        raise ValueError(f"Unsupported obs_shape {obs_shape}")
+
+    obs_shape = (eff_channels, H, W)
+
+    return obs_shape, num_channels, region_num

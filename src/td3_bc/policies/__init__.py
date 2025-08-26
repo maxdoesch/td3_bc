@@ -4,6 +4,7 @@ from .policy import PolicyConfig, BaseActor, BaseCritic
 from .mlp import MlpPolicyConfig, MlpActor, MlpCritic
 from .cnn import CnnPolicyConfig, CnnEncoder, CnnActor, CnnCritic
 from .ftd import FtdPolicyConfig, SharedFTDLayers, FTDActor, FTDCritic
+from .cnn_ftd import CnnFtdEncoder, CnnFtdPolicyConfig
 
 POLICY_REGISTRY = {}
 
@@ -61,6 +62,22 @@ def build_ftd_policy(
     shared_layers = SharedFTDLayers(obs_shape, frame_stack, cfg.shared_layers_cfg).to(device)
     actor = FTDActor(shared_layers, obs_shape, action_dim, max_action, cfg.actor_cfg).to(device)
     critic = FTDCritic(shared_layers, obs_shape, action_dim, cfg.critic_cfg).to(device)
+    return actor, critic
+
+
+@register_policy("cnn_ftd")
+def build_cnn_ftd_policy(
+    obs_shape: Tuple[int, ...],
+    action_dim: int,
+    max_action: float,
+    device: str,
+    cfg: CnnFtdPolicyConfig,
+    **policy_kwargs,
+) -> Tuple[BaseActor, BaseCritic]:
+    frame_stack = policy_kwargs.get("frame_stack", 1)
+    shared_encoder = CnnFtdEncoder(obs_shape, frame_stack, cfg.cnn_encoder_cfg).to(device)
+    actor = CnnActor(shared_encoder, obs_shape, action_dim, max_action, cfg.actor_cfg).to(device)
+    critic = CnnCritic(shared_encoder, obs_shape, action_dim, cfg.critic_cfg).to(device)
     return actor, critic
 
 

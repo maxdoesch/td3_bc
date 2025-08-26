@@ -29,10 +29,9 @@ RAW_IMG_RESOLUTION = 256
 class CombineStackedFrames(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
+        S, C, H, W = env.observation_space.shape
 
-        C, H, W = env.observation_space.shape
-
-        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(H, W * (C // 3), 3), dtype=np.uint8)
+        self.observation_space = gym.spaces.Box(low=0, high=255, shape=(H, W * S, C), dtype=np.uint8)
 
     def observation(self, observation):
         observation = utils.combine_stacked_frames(observation)

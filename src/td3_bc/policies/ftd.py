@@ -5,7 +5,7 @@ from typing import Tuple, Union, Optional
 
 from .policy import PolicyConfig, BaseActor, BaseCritic
 from .mlp import MlpActor, MlpCritic
-from .utils import get_out_shape, weight_init
+from .utils import get_out_shape, weight_init, identify_obs_shape
 
 
 @dataclass
@@ -190,27 +190,7 @@ class SharedFTDLayers(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        H, W = obs_shape[-2:]
-        nd = len(obs_shape)
-
-        if nd == 3:  # (C, H, W)
-            C, _, _ = obs_shape
-            self.num_channels, region_num, eff_channels = 3, C // 3, C
-        elif nd == 4:
-            N, C, _, _ = obs_shape
-            if frame_stack > 1:  # (N, C, H, W)
-                assert frame_stack == N
-                self.num_channels, region_num, eff_channels = C, 1, N * C
-            else:  # (R, C, H, W)
-                self.num_channels, region_num, eff_channels = C, N, N * C
-        elif nd == 5:  # (N, R, C, H, W)
-            N, R, C, _, _ = obs_shape
-            assert frame_stack == N
-            self.num_channels, region_num, eff_channels = C, R, N * R * C
-        else:
-            raise ValueError(f"Unsupported obs_shape {obs_shape}")
-
-        self.input_shape = (eff_channels, H, W)
+        self.input_shape, self.num_channels, region_num = identify_obs_shape(obs_shape, frame_stack)
 
         self.image_attention_selector = (
             ImageAttentionSelectorLayers(
