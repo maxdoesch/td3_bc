@@ -57,7 +57,7 @@ class RewardPredictor(nn.Module):
 
         self.encoder = encoder
         self.mlp = nn.Sequential(
-            nn.Linear(self.encoder.out_dim + action_dim, hidden_dim),
+            nn.Linear(self.encoder.output_dim + action_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -80,7 +80,7 @@ class InverseDynamicPredictor(nn.Module):
 
         self.encoder = encoder
         self.mlp = nn.Sequential(
-            nn.Linear(self.encoder.out_dim * 2, hidden_dim),
+            nn.Linear(self.encoder.output_dim * 2, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),

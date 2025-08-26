@@ -55,7 +55,7 @@ class CnnFtdEncoder(nn.Module):
         obs = torch.reshape(obs, (-1, *self.input_shape))
         obs = self.image_attention_selector(obs)
         return self.encoder(obs)
-    
+
     def select_image(self, obs: torch.Tensor):
         with torch.no_grad():
             obs = self.image_attention_selector(obs.unsqueeze(0))  # Add batch dimension
