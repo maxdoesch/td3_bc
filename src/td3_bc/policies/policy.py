@@ -1,7 +1,7 @@
 import draccus
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Tuple, Union
+from typing import Tuple, Union, Iterable
 
 import torch
 import torch.nn as nn
@@ -13,7 +13,6 @@ class PolicyConfig(draccus.ChoiceRegistry):
 
 
 class BaseActor(nn.Module, ABC):
-    @abstractmethod
     def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float):
         super().__init__()
         self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
@@ -22,7 +21,15 @@ class BaseActor(nn.Module, ABC):
 
     @abstractmethod
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        pass
+        raise NotImplementedError
+
+    @property
+    def actor_loss_parameters(self) -> Iterable[nn.Parameter]:
+        return self.parameters()
+
+    @property
+    def critic_loss_parameters(self) -> Iterable[nn.Parameter]:
+        return []
 
 
 class BaseCritic(nn.Module, ABC):
@@ -36,11 +43,19 @@ class BaseCritic(nn.Module, ABC):
         """
         Forward pass for updating the TD3 critic loss.
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def q1(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         """
         Forward pass for updating the TD3 actor loss.
         """
-        pass
+        raise NotImplementedError
+
+    @property
+    def actor_loss_parameters(self) -> Iterable[nn.Parameter]:
+        return []
+
+    @property
+    def critic_loss_parameters(self) -> Iterable[nn.Parameter]:
+        return self.parameters()

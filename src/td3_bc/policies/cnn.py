@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from dataclasses import dataclass, field
-from typing import Tuple, List
+from typing import Tuple, List, Iterable
 
 from .policy import PolicyConfig, BaseActor, BaseCritic
 from .mlp import MlpActor, MlpCritic
@@ -93,6 +93,14 @@ class CnnActor(BaseActor):
         action = self.actor(obs_feat)
         return action
 
+    @property
+    def actor_loss_parameters(self) -> Iterable[nn.Parameter]:
+        return (
+            list(self.encoder.parameters())
+            + list(self.linear_trunk_layers.parameters())
+            + list(self.actor.parameters())
+        )
+
 
 class CnnCritic(BaseCritic):
     def __init__(self, encoder: CnnEncoder, obs_shape: Tuple[int, ...], action_dim: int, cfg: CnnCriticConfig):
@@ -112,7 +120,7 @@ class CnnCritic(BaseCritic):
     def forward(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         with torch.no_grad():
             obs_feat = self.encoder(obs)
-        obs_feat = self.linear_trunk_layers(obs_feat)
+            obs_feat = self.linear_trunk_layers(obs_feat)
 
         return self.critic(obs_feat, action)
 
@@ -122,6 +130,14 @@ class CnnCritic(BaseCritic):
         obs_feat = self.linear_trunk_layers(obs_feat)
 
         return self.critic.q1(obs_feat, action)
+
+    @property
+    def actor_loss_parameters(self) -> Iterable[nn.Parameter]:
+        return self.linear_trunk_layers.parameters()
+
+    @property
+    def critic_loss_parameters(self) -> Iterable[nn.Parameter]:
+        return self.critic.parameters()
 
 
 if __name__ == "__main__":

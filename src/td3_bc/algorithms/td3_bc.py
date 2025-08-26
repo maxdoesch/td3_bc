@@ -68,8 +68,12 @@ class TD3BC_Base(BaseAgent):
             cfg=cfg.policy_config,
         )
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
-        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=cfg.actor_lr)
-        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=cfg.critic_lr)
+        self.actor_optimizer = torch.optim.Adam(
+            list(self.actor.actor_loss_parameters) + list(self.critic.actor_loss_parameters), lr=cfg.actor_lr
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            list(self.critic.critic_loss_parameters) + list(self.actor.critic_loss_parameters), lr=cfg.critic_lr
+        )
 
         self.actor.train()
         self.critic.train()
