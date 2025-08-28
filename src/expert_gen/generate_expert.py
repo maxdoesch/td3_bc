@@ -85,7 +85,7 @@ def generate_expert_dataset(
     env_kwargs["height"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
     env_kwargs["width"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
     env_kwargs["action_repeat"] = action_repeat
-    if gen_segmentation:
+    if 'distraction' in env_id:
         env_kwargs["is_train"] = True
 
     # Build env
@@ -121,7 +121,7 @@ def generate_expert_dataset(
 
     # Handle dataset naming and duplication
     if dataset_id is None:
-        dataset_id = f"dmc/{env_id}-action_repeat_{action_repeat}-seg_{gen_segmentation}/{skill_level}-v0"
+        dataset_id = f"dmc/{env_id}-act_rep_{action_repeat}-seg_{int(gen_segmentation)}/{skill_level}-v0"
 
     dataset_path = os.path.join(os.path.expanduser("~"), ".minari", "datasets", dataset_id)
     if dataset_id in list_local_datasets() or os.path.exists(dataset_path):

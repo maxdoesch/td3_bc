@@ -291,7 +291,10 @@ class DistractionDMCWrapper(DMCWrapperBackground):
             os.path.join(self._video_dir, f) for f in os.listdir(self._video_dir) if f.endswith(".mp4")
         ]
 
-        self._video_index = 0 if self._is_train else int(0.8 * len(self._video_paths))
+        self._start_video_idx = 0 if self._is_train else int(0.8 * len(self._video_paths))
+        self._stop_video_idx = int(0.8 * len(self._video_paths)) if self._is_train else len(self._video_paths)
+
+        self._video_index = np.random.randint(self._start_video_idx, self._stop_video_idx)
         self._current_frame = 0
         self._data = None
 
@@ -301,9 +304,7 @@ class DistractionDMCWrapper(DMCWrapperBackground):
         return np.moveaxis(video, -1, 1) if self._channels_first else video
 
     def reset(self, *, seed=None, options=None):
-        self._video_index = np.random.randint(
-            0 if self._is_train else int(0.8 * len(self._video_paths)), len(self._video_paths)
-        )
+        self._video_index = np.random.randint(self._start_video_idx, self._stop_video_idx)
         self._data = self._load_video(self._video_paths[self._video_index])
         self._data = interpolate_bg(self._data, (self._height, self._width))
 

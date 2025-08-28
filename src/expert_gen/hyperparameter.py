@@ -74,8 +74,8 @@ HYPERPARAMETERS = {
         n_envs = 16,
         normalize = True,
         normalize_kwargs = dict(norm_obs=True, norm_reward=True, clip_obs=10.0, clip_reward=10.0),
-        n_steps = 256,            # per env → 16*256 = 4096 rollout batch
-        batch_size = 256,
+        n_steps = 1024,            # per env → 16*256 = 4096 rollout batch
+        batch_size = 2048,
         n_epochs = 10,
         learning_rate = get_linear_fn(start=1e-4, end=3e-5, end_fraction=1.0),
         gamma = 0.99,
