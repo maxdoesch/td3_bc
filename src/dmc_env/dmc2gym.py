@@ -178,7 +178,7 @@ class DMCWrapper(Env):
         extra.update(info)
 
         truncated = False  # dm_control has no time limits by default
-        return obs, reward, terminated, truncated, extra
+        return obs, np.float32(reward), terminated, truncated, extra
 
     def reset(self, *, seed=None, options=None):
         if seed is not None:
