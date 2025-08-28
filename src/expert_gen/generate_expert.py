@@ -1,4 +1,5 @@
 import os
+import shutil
 import argparse
 import imageio
 import numpy as np
@@ -67,6 +68,7 @@ def generate_expert_dataset(
     skill_level: str,
     save_to_gif: bool,
     action_repeat: int,
+    overwrite: bool = False,
 ):
     # Determine checkpoint
     checkpoints_dir = os.path.join(expert_path, "checkpoints")
@@ -120,8 +122,14 @@ def generate_expert_dataset(
     # Handle dataset naming and duplication
     if dataset_id is None:
         dataset_id = f"dmc/{env_id}-action_repeat_{action_repeat}/{skill_level}-v0"
-    if dataset_id in list_local_datasets():
-        raise ValueError(f"Dataset ID '{dataset_id}' already exists. Please choose a different ID.")
+
+    dataset_path = os.path.join(os.path.expanduser("~"), ".minari", "datasets", dataset_id)
+    if dataset_id in list_local_datasets() or os.path.exists(dataset_path):
+        if overwrite:
+            print(f"Overwriting existing dataset with ID '{dataset_id}'.")
+            shutil.rmtree(dataset_path)
+        else:
+            raise ValueError(f"Dataset ID '{dataset_id}' already exists. Please choose a different ID.")
 
     # Rollout
     obs, _ = env.reset()
@@ -186,6 +194,7 @@ def main():
     parser.add_argument("--gen-segmentation", action="store_true", help="Generate segmentation masks in the dataset.")
     parser.add_argument("--save-to-gif", action="store_true")
     parser.add_argument("--action-repeat", type=int, default=1, help="Action repeat for the environment.")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing datasets with the same ID.")
     args = parser.parse_args()
 
     for level in SKILL_LEVEL:
@@ -200,6 +209,7 @@ def main():
             skill_level=level,
             action_repeat=args.action_repeat,
             save_to_gif=args.save_to_gif,
+            overwrite=args.overwrite,
         )
 
 

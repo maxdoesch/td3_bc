@@ -1,4 +1,5 @@
 import flax.nnx as nn
+from stable_baselines3.common.utils import get_linear_fn
 
 HYPERPARAMETERS = {
     "dmc_cheetah_run_1-v1": {
@@ -69,4 +70,26 @@ HYPERPARAMETERS = {
             "net_arch": {"pi": [256, 256], "vf": [256, 256]},
         },
     },
+    "dmc_reacher_easy_1-v1": dict(
+        n_envs = 16,
+        normalize = True,
+        normalize_kwargs = dict(norm_obs=True, norm_reward=True, clip_obs=10.0, clip_reward=10.0),
+        n_steps = 256,            # per env → 16*256 = 4096 rollout batch
+        batch_size = 256,
+        n_epochs = 10,
+        learning_rate = get_linear_fn(start=1e-4, end=3e-5, end_fraction=1.0),
+        gamma = 0.99,
+        gae_lambda = 0.95,
+        clip_range = 0.2,
+        vf_coef = 0.5,
+        ent_coef = 0.0,           # optional: 1e-3 if exploration is too timid
+        max_grad_norm = 0.5,
+        use_sde = True,           # helps on small state tasks
+        sde_sample_freq = 4,
+        policy = "MlpPolicy",
+        policy_kwargs = dict(net_arch=dict(pi=[64,64], vf=[64,64]), ortho_init=True),
+        n_timesteps = 1_000_000,
+        gamma_eval = 0.99,
+        env_kwargs = dict(action_repeat=1),
+    )
 }

@@ -7,10 +7,14 @@ from torchvision.ops import masks_to_boxes
 from typing import Generator
 from dataclasses import dataclass
 
-from mobilesamv2.promt_mobilesamv2 import ObjectAwareModel
-from mobilesamv2 import sam_model_registry, SamPredictor
-import mobilesamv2
+import warnings
 
+# disable warnings from MobileSAMv2
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    from mobilesamv2.promt_mobilesamv2 import ObjectAwareModel
+    from mobilesamv2 import sam_model_registry, SamPredictor
+    import mobilesamv2
 
 @dataclass
 class MobileSAMV2Config:

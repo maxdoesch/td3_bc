@@ -12,7 +12,6 @@ from wandb.integration.sb3 import WandbCallback
 from expert_gen.hyperparameter import HYPERPARAMETERS
 import dmc_env  # noqa: F401
 
-
 class VecNormalizeCallback(BaseCallback):
     def __init__(self, vecnormalize_env, save_path, save_freq, verbose=0):
         super().__init__(verbose)
@@ -22,7 +21,7 @@ class VecNormalizeCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         if self.n_calls % self.save_freq == 0:
-            path = os.path.join(self.save_path, f"vecnormalize_step_{self.n_calls}.pkl")
+            path = os.path.join(self.save_path, f"vecnormalize_step_{self.n_calls * self.vecnormalize_env.num_envs}.pkl")
             self.vecnormalize_env.save(path)
             if self.verbose:
                 print(f"Saved VecNormalize stats to {path}")
@@ -38,7 +37,7 @@ def main():
     parser.add_argument("--env-id", type=str, default="dmc_cheetah_run_1-v1", help="Environment ID to train on.")
     parser.add_argument("--eval-envs", type=int, default=1, help="Number of evaluation environments.")
     parser.add_argument("--eval-freq", type=int, default=10_000, help="Evaluation frequency.")
-    parser.add_argument("--n-eval-episodes", type=int, default=10, help="Episodes per evaluation.")
+    parser.add_argument("--n-eval-episodes", type=int, default=20, help="Episodes per evaluation.")
     parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency.")
     parser.add_argument(
         "--output-dir", type=str, default="checkpoints/expert_models", help="Output directory for logs and models."
@@ -81,15 +80,15 @@ def main():
                 eval_env,
                 best_model_save_path=os.path.join(run_path, "best"),
                 log_path=os.path.join(run_path, "eval_logs"),
-                eval_freq=args.eval_freq,
+                eval_freq=args.eval_freq // HYPERPARAMETERS[args.env_id]["n_envs"],
                 n_eval_episodes=args.n_eval_episodes,
                 deterministic=True,
             ),
             CheckpointCallback(
-                save_freq=args.checkpoint_freq, save_path=os.path.join(run_path, "checkpoints"), name_prefix="ppo_model"
+                save_freq=args.checkpoint_freq // HYPERPARAMETERS[args.env_id]["n_envs"], save_path=os.path.join(run_path, "checkpoints"), name_prefix="ppo_model"
             ),
             WandbCallback(gradient_save_freq=100),
-            VecNormalizeCallback(vecnormalize_env=train_env, save_path=vecnorm_path, save_freq=args.checkpoint_freq),
+            VecNormalizeCallback(vecnormalize_env=train_env, save_path=vecnorm_path, save_freq=args.checkpoint_freq // HYPERPARAMETERS[args.env_id]["n_envs"]),
         ]
     )
 
@@ -106,6 +105,8 @@ def main():
         ent_coef=hparams["ent_coef"],
         clip_range=hparams["clip_range"],
         max_grad_norm=hparams["max_grad_norm"],
+        use_sde=hparams.get("use_sde", False),
+        sde_sample_freq=hparams.get("sde_sample_freq", 4),
         policy_kwargs=hparams["policy_kwargs"],
         vf_coef=hparams["vf_coef"],
         verbose=1,
