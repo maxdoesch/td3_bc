@@ -121,7 +121,7 @@ def generate_expert_dataset(
 
     # Handle dataset naming and duplication
     if dataset_id is None:
-        dataset_id = f"dmc/{env_id}-action_repeat_{action_repeat}/{skill_level}-v0"
+        dataset_id = f"dmc/{env_id}-action_repeat_{action_repeat}-seg_{gen_segmentation}/{skill_level}-v0"
 
     dataset_path = os.path.join(os.path.expanduser("~"), ".minari", "datasets", dataset_id)
     if dataset_id in list_local_datasets() or os.path.exists(dataset_path):
