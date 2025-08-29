@@ -102,6 +102,7 @@ def generate_expert_dataset(
         env_config = FTDObservationWrapperConfig(
             sam_config=sam_config,
             add_original_frame=True,
+            sort_by="score",
         )
         env = FTDObservationWrapper(env, config=env_config)
         env = ResizeObservation(env, shape=(image_size, image_size), is_channels_first=True)
