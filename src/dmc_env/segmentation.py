@@ -16,6 +16,7 @@ with warnings.catch_warnings():
     from mobilesamv2 import sam_model_registry, SamPredictor
     import mobilesamv2
 
+
 @dataclass
 class MobileSAMV2Config:
     image_size: int = 96  # Size of the input image for segmentation

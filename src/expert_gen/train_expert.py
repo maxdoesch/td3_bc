@@ -1,31 +1,19 @@
 import os
 import argparse
+import numpy as np
 from typing import Dict
 import gymnasium as gym
 import wandb
 
-from sbx import PPO
+# from sbx import PPO, TD3
+from stable_baselines3 import PPO, TD3
+from stable_baselines3.common.noise import NormalActionNoise
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize
-from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback, BaseCallback
+from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback
 from wandb.integration.sb3 import WandbCallback
 
 from expert_gen.hyperparameter import HYPERPARAMETERS
 import dmc_env  # noqa: F401
-
-class VecNormalizeCallback(BaseCallback):
-    def __init__(self, vecnormalize_env, save_path, save_freq, verbose=0):
-        super().__init__(verbose)
-        self.vecnormalize_env = vecnormalize_env
-        self.save_path = save_path
-        self.save_freq = save_freq
-
-    def _on_step(self) -> bool:
-        if self.n_calls % self.save_freq == 0:
-            path = os.path.join(self.save_path, f"vecnormalize_step_{self.n_calls * self.vecnormalize_env.num_envs}.pkl")
-            self.vecnormalize_env.save(path)
-            if self.verbose:
-                print(f"Saved VecNormalize stats to {path}")
-        return True
 
 
 def make_env(env_id, env_kwargs: Dict):
@@ -35,28 +23,27 @@ def make_env(env_id, env_kwargs: Dict):
 def main():
     parser = argparse.ArgumentParser(description="Train an expert agent using PPO.")
     parser.add_argument("--env-id", type=str, default="dmc_cheetah_run_1-v1", help="Environment ID to train on.")
+    parser.add_argument("--algorithm", type=str, default="ppo", help="RL algorithm to use (default: ppo).")
     parser.add_argument("--eval-envs", type=int, default=1, help="Number of evaluation environments.")
     parser.add_argument("--eval-freq", type=int, default=10_000, help="Evaluation frequency.")
-    parser.add_argument("--n-eval-episodes", type=int, default=20, help="Episodes per evaluation.")
+    parser.add_argument("--n-eval-episodes", type=int, default=10, help="Episodes per evaluation.")
     parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency.")
     parser.add_argument(
         "--output-dir", type=str, default="checkpoints/expert_models", help="Output directory for logs and models."
     )
     args = parser.parse_args()
 
-    hparams = HYPERPARAMETERS[args.env_id]
+    hparams = HYPERPARAMETERS[args.algorithm][args.env_id]
 
     run = wandb.init(
         project="dmc-expert-gen",
-        name=f"ppo-{args.env_id}",
+        name=f"{args.algorithm}-{args.env_id}",
         config={"env_id": args.env_id, "hyperparameters": hparams},
         sync_tensorboard=True,
         monitor_gym=True,
     )
 
     run_path = os.path.join(args.output_dir, f"run-{args.env_id}-{run.id}")
-    vecnorm_path = os.path.join(run_path, "vecnormalize_checkpoints")
-    os.makedirs(vecnorm_path, exist_ok=True)
 
     # Training environment
     train_env = DummyVecEnv([lambda: make_env(args.env_id, hparams["env_kwargs"]) for _ in range(hparams["n_envs"])])
@@ -80,38 +67,53 @@ def main():
                 eval_env,
                 best_model_save_path=os.path.join(run_path, "best"),
                 log_path=os.path.join(run_path, "eval_logs"),
-                eval_freq=args.eval_freq // HYPERPARAMETERS[args.env_id]["n_envs"],
+                eval_freq=args.eval_freq // hparams["n_envs"],
                 n_eval_episodes=args.n_eval_episodes,
                 deterministic=True,
             ),
             CheckpointCallback(
-                save_freq=args.checkpoint_freq // HYPERPARAMETERS[args.env_id]["n_envs"], save_path=os.path.join(run_path, "checkpoints"), name_prefix="ppo_model"
+                save_freq=args.checkpoint_freq // hparams["n_envs"],
+                save_path=os.path.join(run_path, "checkpoints"),
+                save_vecnormalize=hparams.get("normalize", False),
             ),
             WandbCallback(gradient_save_freq=100),
-            VecNormalizeCallback(vecnormalize_env=train_env, save_path=vecnorm_path, save_freq=args.checkpoint_freq // HYPERPARAMETERS[args.env_id]["n_envs"]),
         ]
     )
 
     # Model training
-    model = PPO(
-        policy=hparams["policy"],
-        env=train_env,
-        learning_rate=hparams["learning_rate"],
-        n_steps=hparams["n_steps"],
-        batch_size=hparams["batch_size"],
-        n_epochs=hparams["n_epochs"],
-        gamma=hparams["gamma"],
-        gae_lambda=hparams["gae_lambda"],
-        ent_coef=hparams["ent_coef"],
-        clip_range=hparams["clip_range"],
-        max_grad_norm=hparams["max_grad_norm"],
-        use_sde=hparams.get("use_sde", False),
-        sde_sample_freq=hparams.get("sde_sample_freq", 4),
-        policy_kwargs=hparams["policy_kwargs"],
-        vf_coef=hparams["vf_coef"],
-        verbose=1,
-        tensorboard_log=run_path,
-    )
+    if args.algorithm == "ppo":
+        model = PPO(
+            policy=hparams["policy"],
+            env=train_env,
+            learning_rate=hparams["learning_rate"],
+            n_steps=hparams["n_steps"],
+            batch_size=hparams["batch_size"],
+            n_epochs=hparams["n_epochs"],
+            gamma=hparams["gamma"],
+            gae_lambda=hparams["gae_lambda"],
+            ent_coef=hparams["ent_coef"],
+            clip_range=hparams["clip_range"],
+            max_grad_norm=hparams["max_grad_norm"],
+            use_sde=hparams.get("use_sde", False),
+            sde_sample_freq=hparams.get("sde_sample_freq", 4),
+            policy_kwargs=hparams["policy_kwargs"],
+            vf_coef=hparams["vf_coef"],
+            verbose=1,
+            tensorboard_log=run_path,
+        )
+    elif args.algorithm == "td3":
+        n_actions = train_env.action_space.shape[-1]
+        action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
+        model = TD3(
+            policy=hparams["policy"],
+            env=train_env,
+            learning_starts=hparams["learning_starts"],
+            action_noise=action_noise,
+            verbose=1,
+            tensorboard_log=run_path,
+        )
+    else:
+        raise ValueError(f"Unsupported algorithm: {args.algorithm}")
 
     model.learn(
         total_timesteps=hparams["n_timesteps"],

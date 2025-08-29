@@ -6,7 +6,8 @@ import numpy as np
 import gymnasium as gym
 import tqdm
 
-from sbx import PPO
+# from sbx import PPO, TD3
+from stable_baselines3 import PPO, TD3
 from gymnasium.wrappers import NormalizeObservation
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from minari import DataCollector, list_local_datasets
@@ -60,6 +61,7 @@ class GetStateFromInfo(gym.Wrapper):
 
 def generate_expert_dataset(
     env_id: str,
+    algorithm: str,
     dataset_id: str,
     image_size: int,
     gen_segmentation: bool,
@@ -77,15 +79,15 @@ def generate_expert_dataset(
     training_steps = int(last_checkpoint.split("_")[2].split(".")[0])
     checkpoint = int(SKILL_LEVEL.get(skill_level, 0.95) * training_steps)
 
-    checkpoint_path = os.path.join(checkpoints_dir, f"ppo_model_{checkpoint}_steps.zip")
-    vecnorm_path = os.path.join(expert_path, "vecnormalize_checkpoints", f"vecnormalize_step_{checkpoint}.pkl")
+    checkpoint_path = os.path.join(checkpoints_dir, f"rl_model_{checkpoint}_steps.zip")
+    vecnorm_path = os.path.join(checkpoints_dir, f"rl_model_vecnormalize_{checkpoint}_steps.pkl")
 
     env_kwargs = {}
     env_kwargs["channels_first"] = gen_segmentation
     env_kwargs["height"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
     env_kwargs["width"] = RAW_IMG_RESOLUTION if gen_segmentation else image_size
     env_kwargs["action_repeat"] = action_repeat
-    if 'distraction' in env_id:
+    if "distraction" in env_id:
         env_kwargs["is_train"] = True
 
     # Build env
@@ -117,7 +119,12 @@ def generate_expert_dataset(
         print("Warning: VecNormalize file not found, proceeding without normalization.")
 
     # Load agent
-    model = PPO.load(checkpoint_path)
+    if algorithm == "ppo":
+        model = PPO.load(checkpoint_path)
+    elif algorithm == "td3":
+        model = TD3.load(checkpoint_path)
+    else:
+        raise ValueError(f"Unsupported algorithm: {algorithm}")
 
     # Handle dataset naming and duplication
     if dataset_id is None:
@@ -174,7 +181,7 @@ def generate_expert_dataset(
     env_dc.create_dataset(
         dataset_id=dataset_id,
         eval_env=env_dc,
-        algorithm_name="ppo",
+        algorithm_name=algorithm,
         author=AUTHOR,
         author_email=AUTHOR_EMAIL,
         code_permalink=CODE_PERMALINK,
@@ -187,6 +194,7 @@ def generate_expert_dataset(
 def main():
     parser = argparse.ArgumentParser(description="Generate a Minari expert dataset from a PPO-trained agent.")
     parser.add_argument("--env-id", type=str, default="dmc_distraction_cheetah_run_1-v1")
+    parser.add_argument("--algorithm", type=str, default="ppo")
     parser.add_argument("--dataset-id", type=str)
     parser.add_argument("--image-size", type=int, default=128)
     parser.add_argument("--total-steps", type=int, default=1_000_000)
@@ -201,6 +209,7 @@ def main():
         print(f"--- Generating dataset for skill level: {level} ---")
         generate_expert_dataset(
             env_id=args.env_id,
+            algorithm=args.algorithm,
             dataset_id=args.dataset_id,
             image_size=args.image_size,
             gen_segmentation=args.gen_segmentation,
