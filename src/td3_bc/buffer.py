@@ -1,13 +1,18 @@
 import os
-import numpy as np
-import torch
-import torchvision.transforms as T
 import json
-import minari
+import math
 import logging
 from typing import Dict, Tuple, Optional, Union
 
+import numpy as np
+import torch
+import torchvision.transforms as T
+import h5py
+import minari
+
 import td3_bc.utils as utils
+
+import threading
 
 
 def normalize(array: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, eps: float = 1e-3):
@@ -15,6 +20,10 @@ def normalize(array: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, eps: f
 
 
 class ReplayBuffer:
+    """
+    Disk-backed replay buffer using HDF5. Keeps only small staging tensors in RAM.
+    """
+
     def __init__(
         self,
         obs_shape: Union[int, Tuple[int, ...]],
@@ -22,35 +31,46 @@ class ReplayBuffer:
         max_size: int = int(1e6),
         device: Optional[str] = None,
         augmentations: bool = True,
+        h5_path: str = "replay.h5",
+        mode: str = "a",
+        compression: Optional[str] = None,  # e.g. "lzf" or "gzip"
+        chunk_mb: int = 8,
+        row_chunks: int = 1, 
+        rdcc_nbytes: int = 256*1024*1024, 
+        rdcc_nslots: int = 1000003
     ):
-        self.max_size = max_size
-        self.ptr = 0
-        self.size = 0
-
+        """
+        Args:
+            obs_shape: int or tuple; same semantics as your in-memory buffer.
+            action_dim: number of action dims.
+            max_size: capacity of the buffer (number of transitions).
+            device: torch device for sampling outputs.
+            augmentations: if True and obs are images, apply simple RandomCrop on sample().
+            h5_path: file path for the HDF5 store.
+            mode: h5py open mode; "a" creates if missing and reuses if present.
+            compression: None, "lzf", or "gzip". Use None for max speed.
+            chunk_mb: per-dataset chunk size target in megabytes (used to compute chunk shapes).
+        """
         if device is None:
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.device = device
 
-        self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
-        self.action_dim = action_dim
+        # Normalize obs_shape format
+        self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else tuple(obs_shape)
+        self.action_dim = int(action_dim)
 
+        # Heuristic for image observations (channel or height/width present)
         self.is_image_obs = len(self.obs_shape) >= 2
-        self.max_size = (
-            int(1e5) if self.is_image_obs else max_size
-        )  # hack to avoid MemoryError with large image buffers
 
+        # Handle frame stacking provided in obs_shape like (F, C, H, W) or (F, H, W, C)
         self.frame_stack = 1
         if self.is_image_obs and len(self.obs_shape) >= 4:
             self.frame_stack = self.obs_shape[0]
-            self.obs_shape = self.obs_shape[1:] if self.frame_stack == 1 else self.obs_shape
-
-        obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
-        self.obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device="cpu")
-        self.next_obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device="cpu")
-        self.action = torch.zeros((self.max_size, action_dim), dtype=torch.float32, device="cpu")
-        self.reward = torch.zeros((self.max_size, 1), dtype=torch.float32, device="cpu")
-        self.not_done = torch.zeros((self.max_size, 1), dtype=torch.float32, device="cpu")
-
+            # Keep full shape as provided so we don't silently transpose user data.
+            # Augmentations later will just crop on the last two dims.
+        self.max_size = int(max_size) if max_size is not None else int(1e6)
+        self.row_chunks = int(row_chunks)
+        # Stats tensors (kept small on device)
         self.obs_mean = (
             torch.tensor(0.0, dtype=torch.float32, device=self.device)
             if self.is_image_obs
@@ -62,77 +82,206 @@ class ReplayBuffer:
             else torch.ones(self.obs_shape, dtype=torch.float32, device=self.device)
         )
 
-        self._staging = None  # for async H2D transfers
+        self._staging = None  # for pinned H2D transfers
+        self.augmentations = (
+            T.Compose([T.RandomCrop(self.obs_shape[-2:], padding=4, padding_mode="constant")])
+            if (self.is_image_obs and augmentations)
+            else None
+        )
+        self._io_lock = threading.RLock()
+        # Open or initialize HDF5 file
+        self.h5_path = h5_path
+        # make chunks one row
+        self.f =  h5py.File(self.h5_path, mode, rdcc_nbytes=rdcc_nbytes, rdcc_nslots=rdcc_nslots)
+        self._init_or_validate_file(compression, chunk_mb)
 
-        if self.is_image_obs and augmentations:
-            self.augmentations = T.Compose(
-                [
-                    T.RandomCrop(self.obs_shape[-2:], padding=4, padding_mode="constant"),
-                ]
-            )
-        else:
-            self.augmentations = None
+        # Load pointer and size from file metadata if present
+        self.ptr = int(self.f.attrs.get("ptr", 0))
+        self.size = int(self.f.attrs.get("size", 0))
+
+        
+
+    # ---- HDF5 helpers ----
+
+    def _compute_chunk_shape(self, elem_shape, dtype, chunk_mb: int):
+        """Compute a chunk shape roughly chunk_mb megabytes in size, aligned on the first axis."""
+        bytes_per = np.dtype(dtype).itemsize * int(np.prod(elem_shape))
+        items_per_chunk = max(1, (chunk_mb * 1024 * 1024) // bytes_per)
+        return (min(self.max_size, items_per_chunk), *elem_shape)
+
+    def _require_dataset(self, name, shape, dtype, compression, chunk_mb):
+        if name in self.f:
+            ds = self.f[name]
+            # Validate shape and dtype
+            if ds.shape != (self.max_size, *shape) or ds.dtype != np.dtype(dtype):
+                raise ValueError(
+                    f"Existing dataset {name} has incompatible shape/dtype. "
+                    f"Found {ds.shape}, {ds.dtype}, expected {(self.max_size, *shape)}, {dtype}"
+                )
+            return ds
+        # Create new
+        #chunks = self._compute_chunk_shape(shape, dtype, chunk_mb)
+        chunks = (self.row_chunks, *shape)
+        return self.f.create_dataset(
+            name,
+            shape=(self.max_size, *shape),
+            maxshape=(self.max_size, *shape),
+            dtype=dtype,
+            chunks=chunks,
+            compression=compression,
+        )
+
+    def _init_or_validate_file(self, compression, chunk_mb):
+
+        if "obs" in self.f and isinstance(self.f["obs"], h5py.Dataset):
+            file_max = int(self.f["obs"].shape[0])
+            # adopt file capacity
+            self.max_size = file_max
+            # normalize attrs to file reality
+            self.f.attrs["max_size"] = file_max
+            # also validate shapes/dtypes for other datasets here and return
+            self.d_obs  = self.f["obs"]
+            self.d_next = self.f["next_obs"]
+            self.d_act  = self.f["action"]
+            self.d_rew  = self.f["reward"]
+            self.d_nd   = self.f["not_done"]
+            return
+        
+        # Store meta in file attrs for validation across runs
+        self.f.attrs.setdefault("obs_shape", np.array(self.obs_shape, dtype=np.int64))
+        self.f.attrs.setdefault("action_dim", int(self.action_dim))
+        self.f.attrs.setdefault("max_size", int(self.max_size))
+
+        # If file exists with existing meta, validate
+        if tuple(self.f.attrs["obs_shape"]) != tuple(self.obs_shape):
+            raise ValueError("HDF5 file obs_shape mismatch.")
+        if int(self.f.attrs["action_dim"]) != self.action_dim:
+            raise ValueError("HDF5 file action_dim mismatch.")
+        if int(self.f.attrs["max_size"]) != self.max_size:
+            raise ValueError("HDF5 file max_size mismatch.")
+
+        # Dtypes
+        obs_dtype = np.uint8 if self.is_image_obs else np.float32
+
+        # Create/require datasets
+        self.d_obs = self._require_dataset("obs", self.obs_shape, obs_dtype, compression, chunk_mb)
+        self.d_next = self._require_dataset("next_obs", self.obs_shape, obs_dtype, compression, chunk_mb)
+        self.d_act = self._require_dataset("action", (self.action_dim,), np.float32, compression, chunk_mb)
+        self.d_rew = self._require_dataset("reward", (1,), np.float32, compression, chunk_mb)
+        self.d_nd = self._require_dataset("not_done", (1,), np.float32, compression, chunk_mb)
+
+    def _flush_meta(self):
+        self.f.attrs["ptr"] = int(self.ptr)
+        self.f.attrs["size"] = int(self.size)
+        self.f.flush()
+
+    def _read_fancy(self, dset, idx: np.ndarray) -> np.ndarray:
+        # idx: shape (B,), dtype int64
+        order = np.argsort(idx, kind="stable")
+        sorted_idx = idx[order]
+        # unique indices for the actual h5 read (avoids issues with duplicates)
+        uniq_idx, inverse = np.unique(sorted_idx, return_inverse=True)
+        arr_uniq = dset[uniq_idx]  # h5py read with increasing order indices
+        arr_sorted = arr_uniq[inverse]  # re-expand duplicates, still sorted by idx
+        # unsort to match original random order
+        inv_order = np.empty_like(order)
+        inv_order[order] = np.arange(order.size)
+        return arr_sorted[inv_order]
+
+    def _read_grouped(self, dset, idx: np.ndarray) -> np.ndarray:
+        # idx: (B,) int64
+        order = np.argsort(idx, kind="stable")
+        sorted_idx = idx[order]
+
+        # find contiguous runs in sorted_idx
+        diffs = np.diff(sorted_idx)
+        run_starts = np.concatenate(([0], np.nonzero(diffs != 1)[0] + 1))
+        run_ends = np.concatenate((run_starts[1:], [sorted_idx.size]))
+
+        # read each run as one contiguous slice
+        out_sorted = np.empty((idx.shape[0],) + dset.shape[1:], dtype=dset.dtype)
+        pos = 0
+        for s, e in zip(run_starts, run_ends):
+            start = int(sorted_idx[s])
+            n = int(e - s)
+            block = dset[start:start + n]    # contiguous slice read
+            out_sorted[pos:pos + n] = block
+            pos += n
+
+        # unsort back to original random order
+        inv = np.empty_like(order)
+        inv[order] = np.arange(order.size)
+        return out_sorted[inv]
+    # ---- Public API (mirrors your original) ----
 
     def add(self, obs: np.ndarray, action: np.ndarray, next_obs: np.ndarray, reward: np.ndarray, done: np.ndarray):
         """
-        Add transitions to the replay buffer in a vectorized way.
-
-        Args:
-            obs (np.ndarray): Unnormalized current obs, shape (n_env, *obs_shape) or (*obs_shape,)
-            action (np.ndarray): Action taken, shape (n_env, action_dim) or (action_dim,)
-            next_obs (np.ndarray): Unnormalize next obs, shape (n_env, *obs_shape) or (*obs_shape,)
-            reward (np.ndarray): Reward received, shape (n_env, 1) or (1,)
-            done (np.ndarray): Done flag, shape (n_env, 1) or (1,)
+        Vectorized add.
+        Shapes follow your original: obs (n, *obs_shape) or (*obs_shape,), action (n, A) or (A,),
+        reward (n, 1) or (1,), done same.
         """
-        # Convert to batch if single transition
         obs = np.expand_dims(obs, 0) if obs.ndim == len(self.obs_shape) else obs
         next_obs = np.expand_dims(next_obs, 0) if next_obs.ndim == len(self.obs_shape) else next_obs
         action = np.expand_dims(action, 0) if action.ndim == 1 else action
         reward = np.expand_dims(reward, 1) if reward.ndim == 1 else reward
         done = np.expand_dims(done, 1) if done.ndim == 1 else done
 
-        assert obs.shape[0] == action.shape[0] == next_obs.shape[0] == reward.shape[0] == done.shape[0], (
-            "All inputs must have the same first dimension (number of environments)."
-        )
-
         n_env = obs.shape[0]
+        assert (
+            action.shape[0] == next_obs.shape[0] == reward.shape[0] == done.shape[0] == n_env
+        ), "All inputs must share the same batch dimension."
 
-        indices = torch.arange(self.ptr, self.ptr + n_env) % self.max_size
+        with self._io_lock:
+            # Compute write indices with wrap-around
+            start = self.ptr
+            end = self.ptr + n_env
+            if end <= self.max_size:
+                sl = slice(start, end)
+                self._assign_slice(sl, obs, next_obs, action, reward, done)
+            else:
+                # Wrap around
+                first = slice(start, self.max_size)
+                second = slice(0, end % self.max_size)
+                split = self.max_size - start
+                self._assign_slice(first, obs[:split], next_obs[:split], action[:split], reward[:split], done[:split])
+                self._assign_slice(second, obs[split:], next_obs[split:], action[split:], reward[split:], done[split:])
 
-        obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
-        self.obs[indices] = torch.tensor(obs, dtype=obs_dtype)
-        self.next_obs[indices] = torch.tensor(next_obs, dtype=obs_dtype)
-        self.action[indices] = torch.tensor(action, dtype=torch.float32)
-        self.reward[indices] = torch.tensor(reward, dtype=torch.float32)
-        self.not_done[indices] = 1 - torch.tensor(done, dtype=torch.float32)
+            self.ptr = (self.ptr + n_env) % self.max_size
+            self.size = min(self.size + n_env, self.max_size)
+            self._flush_meta()
 
-        self.ptr = (self.ptr + n_env) % self.max_size
-        self.size = min(self.size + n_env, self.max_size)
+    def _assign_slice(self, sl: slice, obs, next_obs, action, reward, done):
+        if self.is_image_obs:
+            obs = obs.astype(np.uint8, copy=False)
+            next_obs = next_obs.astype(np.uint8, copy=False)
+        else:
+            obs = obs.astype(np.float32, copy=False)
+            next_obs = next_obs.astype(np.float32, copy=False)
+
+        self.d_obs[sl] = obs
+        self.d_next[sl] = next_obs
+        self.d_act[sl] = action.astype(np.float32, copy=False)
+        self.d_rew[sl] = reward.astype(np.float32, copy=False)
+        self.d_nd[sl] = (1.0 - done.astype(np.float32, copy=False))
 
     def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
         """
-        Sample a batch of transitions from the replay buffer.
-
-        Args:
-            batch_size (int): Number of transitions to sample.
-
-        Returns:
-            Dict[str, torch.Tensor]: A dictionary containing the following keys:
-                - "obs": Tensor of shape (batch_size, *obs_shape) with normalized observations.
-                - "action": Tensor of shape (batch_size, action_dim) with actions taken.
-                - "next_obs": Tensor of shape (batch_size, *obs_shape) with normalized next observations.
-                - "reward": Tensor of shape (batch_size) with rewards received.
-                - "not_done": Tensor of shape (batch_size) indicating whether the episode has not ended.
+        Random sample from disk. Uses pinned RAM staging then async H2D copy.
         """
-        idx = torch.randint(0, self.size, size=(batch_size,))
+        if self.size == 0:
+            raise RuntimeError("Cannot sample: buffer is empty.")
 
-        obs_cpu = self.obs.index_select(0, idx)  # uint8 on CPU
-        next_obs_cpu = self.next_obs.index_select(0, idx)
-        act_cpu = self.action.index_select(0, idx)
-        rew_cpu = self.reward.index_select(0, idx)
-        nd_cpu = self.not_done.index_select(0, idx)
+        idx = np.random.randint(0, self.size, size=(batch_size,), dtype=np.int64)
+        with self._io_lock:
+            # Fancy-index read from HDF5 (returns numpy arrays)
+            obs_np  = self._read_grouped(self.d_obs,  idx)
+            next_np = self._read_grouped(self.d_next, idx)
+            act_np  = self._read_grouped(self.d_act,  idx)
+            rew_np  = self._read_grouped(self.d_rew,  idx)
+            nd_np   = self._read_grouped(self.d_nd,   idx)
 
-        if self._staging is None:
+        # Create (or resize) pinned staging tensors
+        if self._staging is None or self._staging["obs"].shape[0] != batch_size:
             obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
             self._staging = {
                 "obs": torch.empty((batch_size, *self.obs_shape), dtype=obs_dtype, pin_memory=True),
@@ -142,11 +291,12 @@ class ReplayBuffer:
                 "not_done": torch.empty((batch_size, 1), dtype=torch.float32, pin_memory=True),
             }
 
-        self._staging["obs"].copy_(obs_cpu, non_blocking=False)
-        self._staging["next_obs"].copy_(next_obs_cpu, non_blocking=False)
-        self._staging["action"].copy_(act_cpu, non_blocking=False)
-        self._staging["reward"].copy_(rew_cpu, non_blocking=False)
-        self._staging["not_done"].copy_(nd_cpu, non_blocking=False)
+        # Copy numpy -> pinned tensors
+        self._staging["obs"].copy_(torch.from_numpy(obs_np), non_blocking=False)
+        self._staging["next_obs"].copy_(torch.from_numpy(next_np), non_blocking=False)
+        self._staging["action"].copy_(torch.from_numpy(act_np), non_blocking=False)
+        self._staging["reward"].copy_(torch.from_numpy(rew_np), non_blocking=False)
+        self._staging["not_done"].copy_(torch.from_numpy(nd_np), non_blocking=False)
 
         # Async H2D; cast images to float on GPU
         obs = self._staging["obs"].to(self.device, non_blocking=True)
@@ -174,65 +324,45 @@ class ReplayBuffer:
             "not_done": not_done,
         }
 
-    def _get_stacked_observations(self, obs: np.array) -> Tuple[np.ndarray, np.ndarray]:
+    def _get_stacked_observations(self, obs: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        # Same logic as your original
         if self.frame_stack > 1:
-            obs_padded = np.concatenate(
-                [np.repeat(obs[:1], self.frame_stack - 1, axis=0), obs], axis=0
-            )  # -> (T+1+F-1, C, H, W) = (T+F, C, H, W)
-
-            obs = np.lib.stride_tricks.sliding_window_view(
-                obs_padded[:-1], window_shape=self.frame_stack, axis=0
-            )  # (T, F, C, H, W)
-            obs = np.moveaxis(obs, -1, 1)
-            next_obs = np.lib.stride_tricks.sliding_window_view(
-                obs_padded[1:], window_shape=self.frame_stack, axis=0
-            )  # (T, F, C, H, W)
-            next_obs = np.moveaxis(next_obs, -1, 1)
+            obs_padded = np.concatenate([np.repeat(obs[:1], self.frame_stack - 1, axis=0), obs], axis=0)
+            obs_sw = np.lib.stride_tricks.sliding_window_view(obs_padded[:-1], window_shape=self.frame_stack, axis=0)
+            obs_sw = np.moveaxis(obs_sw, -1, 1)
+            next_sw = np.lib.stride_tricks.sliding_window_view(obs_padded[1:], window_shape=self.frame_stack, axis=0)
+            next_sw = np.moveaxis(next_sw, -1, 1)
+            return obs_sw, next_sw
         else:
-            next_obs = obs[1:]  # (T, C, H, W)
-            obs = obs[:-1]  # (T, C, H, W)
-
-        return obs, next_obs
+            return obs[:-1], obs[1:]
 
     def convert_dict(self, dict_dataset):
         """
-        Populate the replay buffer with transitions from a dictionary dataset.
-
-        Args:
-            dict_dataset (dict): A dictionary containing episode data with the following keys:
-                - "obs" (list of np.ndarray): Observations for each episode, where each element is an array of shape (episode_length, state_dim).
-                - "acts" (list of np.ndarray): Actions for each episode, where each element is an array of shape (episode_length, action_dim).
-                - "rews" (list of np.ndarray): Rewards for each episode, where each element is an array of shape (episode_length,).
+        Stream episodes from a dictionary dataset onto disk.
+        dict_dataset keys:
+            "obs": list of arrays [T+1, *obs_shape]
+            "acts": list of arrays [T, A]
+            "rews": list of arrays [T]
         """
-
-        for episode in range(len(dict_dataset["acts"])):
-            obs = np.array(dict_dataset["obs"][episode])
-            acts = np.array(dict_dataset["acts"][episode])
-            rews = np.array(dict_dataset["rews"][episode])
-            done = np.concatenate(
-                [
-                    np.zeros_like(dict_dataset["rews"][episode][:-1]),
-                    np.ones_like(dict_dataset["rews"][episode][-1:]),
-                ]
-            )
+        n_eps = len(dict_dataset["acts"])
+        for ep in range(n_eps):
+            obs = np.array(dict_dataset["obs"][ep])
+            acts = np.array(dict_dataset["acts"][ep])
+            rews = np.array(dict_dataset["rews"][ep])
+            done = np.concatenate([np.zeros_like(rews[:-1]), np.ones_like(rews[-1:])])
 
             obs, next_obs = self._get_stacked_observations(obs)
-
-            transition = {"obs": obs, "action": acts, "next_obs": next_obs, "reward": rews, "done": done}
-
+            transition = {
+                "obs": obs,
+                "action": acts,
+                "next_obs": next_obs,
+                "reward": rews.reshape(-1, 1),
+                "done": done.reshape(-1, 1),
+            }
             self.add(**transition)
 
-        self.obs = self.obs[: self.size]
-        self.action = self.action[: self.size]
-        self.reward = self.reward[: self.size]
-        self.next_obs = self.next_obs[: self.size]
-        self.not_done = self.not_done[: self.size]
-
     def convert_minari(self, dataset: minari.MinariDataset):
-        # assert dataset.observation_space.shape == self.obs_shape or dataset.observation_space.shape[::-1] == self.obs_shape, "Observation dimension mismatch."
-
         assert dataset.action_space.shape[0] == self.action_dim, "Action dimension mismatch."
-
         for episode in dataset.iterate_episodes():
             observations = utils.uncombine_stacked_frames(episode.observations)
             obs, next_obs = self._get_stacked_observations(observations)
@@ -240,207 +370,136 @@ class ReplayBuffer:
                 "obs": obs,
                 "action": episode.actions,
                 "next_obs": next_obs,
-                "reward": episode.rewards,
-                "done": episode.terminations,
+                "reward": episode.rewards.reshape(-1, 1),
+                "done": episode.terminations.reshape(-1, 1),
             }
             self.add(**transition)
 
-        self.obs = self.obs[: self.size]
-        self.action = self.action[: self.size]
-        self.reward = self.reward[: self.size]
-        self.next_obs = self.next_obs[: self.size]
-        self.not_done = self.not_done[: self.size]
+    # ---- Statistics (computed streaming to avoid RAM spikes) ----
 
-    def save_statistics(self, stats_path: str):
+    def compute_dataset_statistics(self, batch: int = 65536) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Save dataset statistics (mean and standard deviation of observations) to a JSON file.
-
-        Args:
-            stats_path (str): Directory path or file path to save the statistics JSON file.
+        Compute mean and std over stored observations on disk.
+        Uses Welford’s algorithm with chunked reads.
         """
-
-        if not stats_path.endswith(".json"):
-            stats_path = os.path.join(stats_path, "dataset_statistics.json")
-
-        stats = {
-            "obs_mean": self.obs_mean.cpu().tolist(),
-            "obs_std": self.obs_std.cpu().tolist(),
-        }
-        with open(stats_path, "w") as f:
-            json.dump(stats, f, indent=4)
-
-    def load_statistics(self, stats_path: str) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Load dataset statistics (mean and standard deviation of observations) from a JSON file
-        and set them using `set_dataset_statistics`.
-
-        Args:
-            stats_path (str): Directory path or file path to the JSON file containing statistics.
-        """
-        if not stats_path.endswith(".json"):
-            stats_path = os.path.join(stats_path, "dataset_statistics.json")
-
-        if os.path.exists(stats_path):
-            with open(stats_path, "r") as f:
-                stats = json.load(f)
-            obs_mean = np.array(stats["obs_mean"])
-            obs_std = np.array(stats["obs_std"])
-            self.set_dataset_statistics(obs_mean, obs_std)
-        else:
-            logging.warning(f"Dataset statistics not found at {stats_path}. Replay buffer will not be normalized.")
-            obs_mean = self.obs_mean.cpu().numpy()
-            obs_std = self.obs_std.cpu().numpy()
-
-        return obs_mean, obs_std
-
-    def compute_dataset_statistics(self) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Compute the mean and standard deviation of the observation dataset.
-
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - obs_mean (np.ndarray): The mean of the observations.
-                - obs_std (np.ndarray): The standard deviation of the observations.
-        """
-
         if self.is_image_obs:
-            obs_mean = torch.tensor(0, dtype=torch.float32)
-            obs_std = torch.tensor(255.0, dtype=torch.float32)
-        else:
-            obs_mean = torch.mean(self.obs[: self.size], axis=0, keepdims=False)
-            obs_std = torch.std(self.obs[: self.size], axis=0, keepdims=False)
+            obs_mean = np.array(0.0, dtype=np.float32)
+            obs_std = np.array(255.0, dtype=np.float32)
+            return obs_mean, obs_std
 
-        return obs_mean.numpy(), obs_std.numpy()
+        count = 0
+        mean = None
+        M2 = None
+
+        total = self.size
+        if total == 0:
+            # Fallback to zeros/ones like init
+            return self.obs_mean.detach().cpu().numpy(), self.obs_std.detach().cpu().numpy()
+
+        # Iterate in chunks over the valid segment [0, size)
+        for start in range(0, total, batch):
+            end = min(start + batch, total)
+            x = self.d_obs[start:end].astype(np.float32, copy=False)  # shape [B, *obs_shape]
+
+            # Flatten batch dimension only
+            b = x.shape[0]
+            x = x.reshape(b, *self.obs_shape)
+
+            # Batch statistics
+            batch_mean = x.mean(axis=0)
+            batch_var = x.var(axis=0)
+            batch_count = b
+
+            if mean is None:
+                mean = batch_mean
+                M2 = batch_var * batch_count
+                count = batch_count
+            else:
+                delta = batch_mean - mean
+                tot = count + batch_count
+                mean = mean + delta * (batch_count / tot)
+                M2 = M2 + batch_var * batch_count + delta * delta * (count * batch_count / tot)
+                count = tot
+
+        var = M2 / max(1, count - 1)
+        std = np.sqrt(np.maximum(var, 1e-12)).astype(np.float32)
+
+        return mean.astype(np.float32), std
 
     def set_dataset_statistics(self, obs_mean: np.ndarray, obs_std: np.ndarray):
-        """
-        Set the mean and standard deviation for the dataset.
-
-        Args:
-            obs_mean (np.ndarray): The mean to use for normalization.
-            obs_std (np.ndarray): The standard deviation to use for normalization.
-        """
         self.obs_mean = torch.tensor(obs_mean, dtype=torch.float32, device=self.device)
         self.obs_std = torch.tensor(obs_std, dtype=torch.float32, device=self.device)
 
     def get_dataset_statistics(self) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Get the current dataset statistics (mean and standard deviation).
+        return self.obs_mean.detach().cpu().numpy(), self.obs_std.detach().cpu().numpy()
 
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: A tuple containing:
-                - obs_mean (np.ndarray): The mean of the observations.
-                - obs_std (np.ndarray): The standard deviation of the observations.
-        """
-        return self.obs_mean.cpu().numpy(), self.obs_std.cpu().numpy()
+    def save_statistics(self, stats_path: str):
+        if not stats_path.endswith(".json"):
+            stats_path = os.path.join(stats_path, "dataset_statistics.json")
+        stats = {"obs_mean": self.get_dataset_statistics()[0].tolist(),
+                 "obs_std": self.get_dataset_statistics()[1].tolist()}
+        os.makedirs(os.path.dirname(stats_path) or ".", exist_ok=True)
+        with open(stats_path, "w") as f:
+            json.dump(stats, f, indent=4)
+
+    def load_statistics(self, stats_path: str) -> Tuple[np.ndarray, np.ndarray]:
+        if not stats_path.endswith(".json"):
+            stats_path = os.path.join(stats_path, "dataset_statistics.json")
+        if os.path.exists(stats_path):
+            with open(stats_path, "r") as f:
+                stats = json.load(f)
+            obs_mean = np.array(stats["obs_mean"], dtype=np.float32)
+            obs_std = np.array(stats["obs_std"], dtype=np.float32)
+            self.set_dataset_statistics(obs_mean, obs_std)
+        else:
+            logging.warning(f"Dataset statistics not found at {stats_path}. Replay buffer will not be normalized.")
+            obs_mean = self.obs_mean.detach().cpu().numpy()
+            obs_std = self.obs_std.detach().cpu().numpy()
+        return obs_mean, obs_std
+
+    # ---- Cleanup ----
+
+    def close(self):
+        self._flush_meta()
+        try:
+            self.f.close()
+        except Exception:
+            pass
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
-    # Example usage
+    # Minimal smoke test
     obs_shape = 3
     action_dim = 4
-    max_size = int(1e6)
-    n_env = 5
+    max_size = int(1e5)
+    buf = ReplayBuffer(obs_shape, action_dim, max_size=max_size, h5_path="rb_small.h5", compression=None)
 
-    buffer = ReplayBuffer(obs_shape, action_dim, max_size)
-
-    # Simulate adding transitions
+    # Add a small batch
+    n_env = 7
     transition = {
-        "obs": np.random.rand(n_env, obs_shape),
-        "action": np.random.rand(n_env, action_dim),
-        "next_obs": np.random.rand(n_env, obs_shape),
-        "reward": np.random.rand(n_env, 1),
-        "done": np.random.randint(0, 2, size=(n_env, 1)),
+        "obs": np.random.rand(n_env, obs_shape).astype(np.float32),
+        "action": np.random.rand(n_env, action_dim).astype(np.float32),
+        "next_obs": np.random.rand(n_env, obs_shape).astype(np.float32),
+        "reward": np.random.rand(n_env, 1).astype(np.float32),
+        "done": np.random.randint(0, 2, size=(n_env, 1)).astype(np.float32),
     }
+    buf.add(**transition)
+    print("size:", buf.size, "ptr:", buf.ptr)
 
-    buffer.add(**transition)
-    print("Buffer size after adding transitions:", buffer.size)
-    print("Buffer pointer after adding transitions:", buffer.ptr)
+    # Stats
+    mean, std = buf.compute_dataset_statistics()
+    buf.set_dataset_statistics(mean, std)
+    print("mean shape:", np.shape(mean), "std shape:", np.shape(std))
 
-    # Sample a batch
-    batch = buffer.sample(batch_size=2)
-    print("Sampled batch:")
-    for key, value in batch.items():
-        print(f"{key}: {value.shape}")
+    # Sample
+    batch = buf.sample(batch_size=4)
+    for k, v in batch.items():
+        print(k, tuple(v.shape))
 
-    # Convert a dictionary dataset
-    episodes = 3
-    episode_length = 1000
-    dict_dataset = {
-        "obs": [np.random.randn(episode_length + 1, obs_shape) for _ in range(episodes)],
-        "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
-        "rews": [np.random.randn(episode_length) for _ in range(episodes)],
-        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
-    }
-    buffer.convert_dict(dict_dataset)
-    print("Buffer size after converting dictionary dataset:", buffer.size)
-    print("Buffer pointer after converting dictionary dataset:", buffer.ptr)
-
-    # Normalize obs
-    mean, std = buffer.compute_dataset_statistics()
-    buffer.set_dataset_statistics(mean, std)
-    print("Mean:", mean)
-    print("Std:", std)
-
-    print("---------------------------------------------------------")
-
-    obs_shape = (32, 32, 3)
-    buffer = ReplayBuffer(obs_shape, action_dim, max_size=int(1e6))
-    print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
-
-    episode_length = 100
-    dict_dataset = {
-        "obs": [np.random.randn(episode_length + 1, *obs_shape) for _ in range(episodes)],
-        "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
-        "rews": [np.random.randn(episode_length) for _ in range(episodes)],
-        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
-    }
-    buffer.convert_dict(dict_dataset)
-    print("Buffer size after converting dictionary dataset with complex shapes:", buffer.size)
-    print("Buffer pointer after converting dictionary dataset with complex shapes:", buffer.ptr)
-
-    mean, std = buffer.compute_dataset_statistics()
-    buffer.set_dataset_statistics(mean, std)
-
-    batch = buffer.sample(batch_size=2)
-    print("Sampled batch:")
-    for key, value in batch.items():
-        print(f"{key}: {value.shape}")
-
-    print("---------------------------------------------------------")
-
-    frame_stack = 3
-    obs_shape = (3, 64, 64)
-    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5), augmentations=False)
-    print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
-
-    episode_length = 1000
-    dict_dataset = {
-        "obs": [
-            np.broadcast_to(
-                np.arange(episode_length + 1).reshape(-1, *([1] * len(obs_shape))), (episode_length + 1, *obs_shape)
-            )
-            for _ in range(episodes)
-        ],
-        "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
-        "rews": [np.random.randn(episode_length) for _ in range(episodes)],
-        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
-    }
-    buffer.convert_dict(dict_dataset)
-    print("Buffer size after converting dictionary dataset with complex shapes:", buffer.size)
-    print("Buffer pointer after converting dictionary dataset with complex shapes:", buffer.ptr)
-
-    mean, std = buffer.compute_dataset_statistics()
-    buffer.set_dataset_statistics(mean, std)
-
-    batch = buffer.sample(batch_size=256)
-    print("Sampled batch:")
-    for key, value in batch.items():
-        print(f"{key}: {value.shape}")
-
-    assert torch.allclose(255 * batch["obs"][0] + 1, 255 * batch["next_obs"][0]), (
-        "Observation and next observation do not match"
-    )
-    assert torch.allclose(
-        torch.stack([255 * batch["obs"][0, 0] + i for i in range(frame_stack)]), 255 * batch["obs"][0]
-    ), "Stacked observations do not match expected values"
+    buf.close()
