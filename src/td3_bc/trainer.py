@@ -23,6 +23,8 @@ import td3_bc.algorithms.td3_bc_ftd as td3_bc_ftd
 from td3_bc.evaluator import Evaluator, Metric, RewardAndLengthMetric
 import td3_bc.algorithms as algorithms
 
+from td3_bc.prefetch import H5Prefetcher
+
 
 @dataclass
 class ModeConfig(draccus.ChoiceRegistry):
@@ -331,6 +333,7 @@ class Trainer(ABC):
             self._set_seed(seed)
 
             self._load_agent(pretrain_dir, pretrain_checkpoint, seed)
+            self.seed = seed
 
             self.initialize_replay_buffer()
 
@@ -344,38 +347,71 @@ class Trainer(ABC):
 
             eval_metrics = {}
 
-            for i in tqdm(
-                range(start_step, self.cfg.train_steps),
-                desc="Training Steps",
-                initial=start_step,
-                total=self.cfg.train_steps,
-            ):
-                batch = self.get_batch(self.cfg.batch_size)
-                metrics = self.agent.train_step(batch)
+            prefetcher = H5Prefetcher(self.buffer, batch_size=self.cfg.batch_size,
+                                      device=self.cfg.device, max_prefetch=4)
+            prefetcher.start()
 
-                run.log(metrics, step=i)
+            self.prefetcher = prefetcher
 
-                if self.cfg.eval_freq > 0 and (
-                    (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0
+            eval_metrics = {}
+
+            try:
+                for i in tqdm(
+                    range(start_step, self.cfg.train_steps),
+                    desc="Training Steps",
+                    initial=start_step,
+                    total=self.cfg.train_steps,
                 ):
-                    self.agent.eval()
-                    eval_metrics = self.evaluator.evaluate(self.agent)
-                    self.agent.train()
+                    # pull next ready batch
+                    batch = self.prefetcher.get()
 
-                    run.log(eval_metrics, step=i)
+                    metrics = self.agent.train_step(batch)
+                    run.log(metrics, step=i)
 
-                if self.cfg.checkpoint_freq > 0 and (
-                    (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1
-                ):
-                    checkpoint_dir = os.path.join(self.cfg.checkpoint_mode_dir, f"seed_{seed}", f"checkpoint_{i + 1}")
-                    os.makedirs(checkpoint_dir, exist_ok=True)
-                    self.agent.save(checkpoint_dir)
+                    # EVAL: skip i == 0 (this is what was freezing you)
+                    do_eval = (
+                        self.cfg.eval_freq > 0
+                        and (((i + 1) % self.cfg.eval_freq == 0) or (i == self.cfg.train_steps - 1))
+                    )
+                    if do_eval:
+                        # pause prefetch to avoid GPU contention and blocking during heavy eval
+                        self.prefetcher.stop()
 
-                    latest_checkpoint = os.path.join(self.cfg.checkpoint_mode_dir, f"seed_{seed}", "checkpoint_latest")
-                    os.makedirs(latest_checkpoint, exist_ok=True)
-                    self.agent.save(latest_checkpoint)
+                        self.agent.eval()
+                        eval_metrics = self.evaluator.evaluate(self.agent)
+                        self.agent.train()
+                        run.log(eval_metrics, step=i)
 
-            run.finish()
+                        # resume prefetching
+                        self.prefetcher.start()
+
+                    if self.cfg.checkpoint_freq > 0 and (
+                        (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1
+                    ):
+                        checkpoint_dir = os.path.join(
+                            self.cfg.checkpoint_mode_dir, f"seed_{seed}", f"checkpoint_{i + 1}"
+                        )
+                        os.makedirs(checkpoint_dir, exist_ok=True)
+                        self.agent.save(checkpoint_dir)
+
+                        latest_checkpoint = os.path.join(
+                            self.cfg.checkpoint_mode_dir, f"seed_{seed}", "checkpoint_latest"
+                        )
+                        os.makedirs(latest_checkpoint, exist_ok=True)
+                        self.agent.save(latest_checkpoint)
+
+            finally:
+                # Always clean up even on Ctrl-C
+                try:
+                    self.prefetcher.stop()
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self.buffer, "close"):
+                        self.buffer.close()
+                except Exception:
+                    pass
+                run.finish()
 
             return eval_metrics
 
@@ -406,19 +442,88 @@ class OfflineTrainer(Trainer):
         else:
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
+    def _slugify(self, s: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9._-]+", "_", s)
+
+    def _h5_path_for_dataset(self) -> str:
+        if not self.cfg.dataset_path:
+            raise ValueError("dataset_path (Minari ID) must be set for OfflineTrainer.")
+        slug = self._slugify(self.cfg.dataset_path)
+        # put cache OUTSIDE checkpoint_mode_dir so it survives non-resume runs
+        cache_root = os.path.join(self.cfg.experiment_dir, "_replay_cache")
+        seed_dir = os.path.join(cache_root, f"seed_{self.seed}")
+        os.makedirs(seed_dir, exist_ok=True)
+        return os.path.join(seed_dir, f"{slug}.h5")
+
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
+        # where the replay will live; name derived from Minari ID
+        h5_path = self._h5_path_for_dataset()
 
-        self._fill_replay_buffer()
+        # If replay already exists, just open it and skip conversion
+        if os.path.exists(h5_path):
+            self.buffer = ReplayBuffer(
+                obs_shape=self.obs_shape,
+                action_dim=self.action_dim,
+                device=self.cfg.device,
+                h5_path=h5_path,
+                mode="a",
+                augmentations=False,
+                compression=None,
+            )
+            logging.info(f"Using existing replay: {h5_path} ({self.buffer.size} transitions)")
 
+            # Stats: prefer the experiment-level JSON if present, else fall back or recompute
+            if os.path.exists(self.cfg.dataset_statistics_path):
+                self.buffer.load_statistics(self.cfg.dataset_statistics_path)
+            else:
+                fallback_stats = os.path.splitext(h5_path)[0] + "_dataset_statistics.json"
+                if os.path.exists(fallback_stats):
+                    self.buffer.load_statistics(fallback_stats)
+                    # also copy to experiment-level location for consistency
+                    shutil.copyfile(fallback_stats, self.cfg.dataset_statistics_path)
+                else:
+                    mean, std = self.buffer.compute_dataset_statistics()
+                    self.buffer.set_dataset_statistics(mean, std)
+                    self.buffer.save_statistics(self.cfg.dataset_statistics_path)
+
+            logging.info(f"Loaded dataset statistics from {self.cfg.dataset_statistics_path}")
+            return
+
+        # Otherwise: convert Minari -> HDF5 once
+        logging.info(f"Converting Minari dataset '{self.cfg.dataset_path}' to {h5_path}")
+        ds = minari.load_dataset(self.cfg.dataset_path, download=True)
+
+        # Count transitions to size the file exactly (one transition per reward)
+        total_transitions = 0
+        for ep in ds.iterate_episodes():
+            total_transitions += len(ep.rewards)
+
+        self.buffer = ReplayBuffer(
+            obs_shape=self.obs_shape,
+            action_dim=self.action_dim,
+            max_size=total_transitions,
+            device=self.cfg.device,
+            h5_path=h5_path,
+            mode="w",              # fresh file
+            augmentations=False,   # offline: usually keep aug off here
+            compression=None,      # fastest I/O; use "lzf" if you want light compression
+        )
+
+        # Stream episodes to disk
+        self.buffer.convert_minari(ds)
+        logging.info(f"Wrote {self.buffer.size} transitions to {h5_path}")
+
+        # Compute and save normalization stats once
         obs_mean, obs_std = self.buffer.compute_dataset_statistics()
         self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
+        # Save both next to the h5 and at your experiment-level path for convenience
         self.buffer.save_statistics(self.cfg.dataset_statistics_path)
+        self.buffer.save_statistics(os.path.splitext(h5_path)[0] + "_dataset_statistics.json")
 
-        logging.info(f"Observations normalized and dataset statistics saved to {self.cfg.experiment_dir}")
+        logging.info(f"Dataset statistics saved to {self.cfg.dataset_statistics_path}")
 
     def get_batch(self, batch_size: int) -> Dict[str, torch.Tensor]:
-        return self.buffer.sample(batch_size)
+        return self.prefetcher.get()
 
 
 class OnlineTrainer(Trainer):
