@@ -272,6 +272,8 @@ class ReplayBuffer:
             raise RuntimeError("Cannot sample: buffer is empty.")
 
         idx = np.random.randint(0, self.size, size=(batch_size,), dtype=np.int64)
+        import time
+        t0 = time.time()
         with self._io_lock:
             # Fancy-index read from HDF5 (returns numpy arrays)
             obs_np  = self._read_grouped(self.d_obs,  idx)
@@ -280,6 +282,8 @@ class ReplayBuffer:
             rew_np  = self._read_grouped(self.d_rew,  idx)
             nd_np   = self._read_grouped(self.d_nd,   idx)
 
+        t_read = time.time() - t0
+        t1 = time.time()
         # Create (or resize) pinned staging tensors
         if self._staging is None or self._staging["obs"].shape[0] != batch_size:
             obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
@@ -315,6 +319,10 @@ class ReplayBuffer:
 
         obs_norm = normalize(obs, self.obs_mean, self.obs_std)
         next_obs_norm = normalize(next_obs, self.obs_mean, self.obs_std)
+
+        t_move = time.time() - t1
+
+        print(f"[SAMPLE] batch={batch_size} read={t_read:.3f}s move={t_move:.3f}s")
 
         return {
             "obs": obs_norm,
