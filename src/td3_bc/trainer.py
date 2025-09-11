@@ -347,8 +347,19 @@ class Trainer(ABC):
 
             eval_metrics = {}
 
-            prefetcher = H5Prefetcher(self.buffer, batch_size=self.cfg.batch_size,
-                                      device=self.cfg.device, max_prefetch=4)
+
+            prefetcher = H5Prefetcher(
+                buffer=self.buffer,
+                batch_size=self.cfg.batch_size,
+                device=self.cfg.device,
+                max_prefetch=1,                # # of per-step batches buffered ahead
+                #budget_bytes=int(8e9),        # <-- set this to ~50% of your RAM if you like
+                # OR set mega_batch_rows if you prefer exact rows:
+                mega_batch_rows=self.cfg.batch_size * 10,
+                read_contiguous=True,          # fastest I/O; good mixing still happens across mega-batches
+                profile=True,                 # set True to see read/pack timing
+                trigger_load_when_remaining_leq=5,
+            )
             prefetcher.start()
 
             self.prefetcher = prefetcher
@@ -456,30 +467,29 @@ class OfflineTrainer(Trainer):
         return os.path.join(seed_dir, f"{slug}.h5")
 
     def initialize_replay_buffer(self):
-        # where the replay will live; name derived from Minari ID
         h5_path = self._h5_path_for_dataset()
 
-        # If replay already exists, just open it and skip conversion
         if os.path.exists(h5_path):
+            # READ-ONLY open: avoids write locks and read-only write attempts
             self.buffer = ReplayBuffer(
                 obs_shape=self.obs_shape,
                 action_dim=self.action_dim,
                 device=self.cfg.device,
                 h5_path=h5_path,
-                mode="a",
+                mode="r",           # <- was "a"
                 augmentations=False,
                 compression=None,
+                rdcc_nbytes=2_147_483_648, rdcc_nslots=4_000_003
             )
-            logging.info(f"Using existing replay: {h5_path} ({self.buffer.size} transitions)")
+            logging.info(f"Using existing replay (read-only): {h5_path} ({self.buffer.size} transitions)")
 
-            # Stats: prefer the experiment-level JSON if present, else fall back or recompute
+            # Stats: prefer experiment-level JSON, else fallback or recompute
             if os.path.exists(self.cfg.dataset_statistics_path):
                 self.buffer.load_statistics(self.cfg.dataset_statistics_path)
             else:
                 fallback_stats = os.path.splitext(h5_path)[0] + "_dataset_statistics.json"
                 if os.path.exists(fallback_stats):
                     self.buffer.load_statistics(fallback_stats)
-                    # also copy to experiment-level location for consistency
                     shutil.copyfile(fallback_stats, self.cfg.dataset_statistics_path)
                 else:
                     mean, std = self.buffer.compute_dataset_statistics()
@@ -489,38 +499,48 @@ class OfflineTrainer(Trainer):
             logging.info(f"Loaded dataset statistics from {self.cfg.dataset_statistics_path}")
             return
 
-        # Otherwise: convert Minari -> HDF5 once
+        # Otherwise: convert Minari -> HDF5 once (WRITE), then reopen READ-ONLY
         logging.info(f"Converting Minari dataset '{self.cfg.dataset_path}' to {h5_path}")
         ds = minari.load_dataset(self.cfg.dataset_path, download=True)
 
-        # Count transitions to size the file exactly (one transition per reward)
         total_transitions = 0
         for ep in ds.iterate_episodes():
             total_transitions += len(ep.rewards)
 
-        self.buffer = ReplayBuffer(
+        # Writer handle
+        writer = ReplayBuffer(
             obs_shape=self.obs_shape,
             action_dim=self.action_dim,
             max_size=total_transitions,
             device=self.cfg.device,
             h5_path=h5_path,
-            mode="w",              # fresh file
-            augmentations=False,   # offline: usually keep aug off here
-            compression=None,      # fastest I/O; use "lzf" if you want light compression
+            mode="w",
+            augmentations=False,
+            compression=None,
         )
+        writer.convert_minari(ds)
+        logging.info(f"Wrote {writer.size} transitions to {h5_path}")
 
-        # Stream episodes to disk
-        self.buffer.convert_minari(ds)
-        logging.info(f"Wrote {self.buffer.size} transitions to {h5_path}")
-
-        # Compute and save normalization stats once
-        obs_mean, obs_std = self.buffer.compute_dataset_statistics()
-        self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
-        # Save both next to the h5 and at your experiment-level path for convenience
-        self.buffer.save_statistics(self.cfg.dataset_statistics_path)
-        self.buffer.save_statistics(os.path.splitext(h5_path)[0] + "_dataset_statistics.json")
-
+        # Stats once
+        obs_mean, obs_std = writer.compute_dataset_statistics()
+        writer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
+        writer.save_statistics(self.cfg.dataset_statistics_path)
+        writer.save_statistics(os.path.splitext(h5_path)[0] + "_dataset_statistics.json")
         logging.info(f"Dataset statistics saved to {self.cfg.dataset_statistics_path}")
+
+        writer.close()  # release write lock
+
+        # Reopen read-only for training
+        self.buffer = ReplayBuffer(
+            obs_shape=self.obs_shape,
+            action_dim=self.action_dim,
+            device=self.cfg.device,
+            h5_path=h5_path,
+            mode="r",
+            augmentations=False,
+            compression=None,
+        )
+        self.buffer.load_statistics(self.cfg.dataset_statistics_path)
 
     def get_batch(self, batch_size: int) -> Dict[str, torch.Tensor]:
         return self.prefetcher.get()
