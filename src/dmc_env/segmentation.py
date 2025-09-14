@@ -205,6 +205,9 @@ class MobileSAMV2:
             labels = labels[keep]
 
         # Get boxes from masks
+        if pred_masks.numel() == 0:
+            return None
+
         pred_boxes = masks_to_boxes(pred_masks)  # (N, 4)
 
         return {"boxes": pred_boxes, "scores": scores, "labels": labels, "masks": pred_masks}
