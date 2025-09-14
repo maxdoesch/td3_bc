@@ -25,7 +25,7 @@ def main():
     parser.add_argument("--env-id", type=str, default="dmc_cheetah_run_1-v1", help="Environment ID to train on.")
     parser.add_argument("--algorithm", type=str, default="ppo", help="RL algorithm to use (default: ppo).")
     parser.add_argument("--eval-envs", type=int, default=1, help="Number of evaluation environments.")
-    parser.add_argument("--eval-freq", type=int, default=10_000, help="Evaluation frequency.")
+    parser.add_argument("--eval-freq", type=int, default=20_000, help="Evaluation frequency.")
     parser.add_argument("--n-eval-episodes", type=int, default=10, help="Episodes per evaluation.")
     parser.add_argument("--checkpoint-freq", type=int, default=100_000, help="Checkpoint frequency.")
     parser.add_argument(

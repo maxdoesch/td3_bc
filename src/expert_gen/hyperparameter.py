@@ -98,9 +98,16 @@ HYPERPARAMETERS = {
         "dmc_reacher_easy_1-v1": dict(
             n_envs=1,
             policy="MlpPolicy",
-            learning_starts=10,
+            learning_starts=100,
             n_timesteps=1_000_000,
-            env_kwargs=dict(action_repeat=1),
+            env_kwargs=dict(action_repeat=4),
+        ),
+        "dmc_cheetah_run_1-v1": dict(
+            n_envs=1,
+            policy="MlpPolicy",
+            learning_starts=100,
+            n_timesteps=1_000_000,
+            env_kwargs=dict(action_repeat=4),
         )
     },
 }
