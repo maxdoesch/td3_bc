@@ -125,7 +125,7 @@ class ReplayBuffer:
         self.f.attrs.setdefault("max_size", int(self.max_size))
 
         # create compound dataset with row chunks
-        dtype = self._compound_dtype()
+        dtype = self._make_row_dtype()
         self.dset = self.f.create_dataset(
             "transitions",
             shape=(self.max_size,),
