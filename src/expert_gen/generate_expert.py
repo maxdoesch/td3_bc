@@ -6,7 +6,7 @@ import numpy as np
 import gymnasium as gym
 import tqdm
 
-# from sbx import PPO, TD3
+#from sbx import PPO, TD3
 from stable_baselines3 import PPO, TD3
 from gymnasium.wrappers import NormalizeObservation
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
@@ -71,13 +71,15 @@ def generate_expert_dataset(
     save_to_gif: bool,
     action_repeat: int,
     overwrite: bool = False,
+    add_noise: bool = False,
 ):
     # Determine checkpoint
     checkpoints_dir = os.path.join(expert_path, "checkpoints")
     checkpoints = os.listdir(checkpoints_dir)
+    checkpoints = [ckpt for ckpt in checkpoints if not 'vecnormalize' in ckpt and ckpt.endswith('.zip')]
     last_checkpoint = sorted(checkpoints, key=lambda x: int(x.split("_")[2].split(".")[0]))[-1]
     training_steps = int(last_checkpoint.split("_")[2].split(".")[0])
-    checkpoint = int(SKILL_LEVEL.get(skill_level, 0.95) * training_steps)
+    checkpoint = int(SKILL_LEVEL.get(skill_level, 1.0) * training_steps)
 
     checkpoint_path = os.path.join(checkpoints_dir, f"rl_model_{checkpoint}_steps.zip")
     vecnorm_path = os.path.join(checkpoints_dir, f"rl_model_vecnormalize_{checkpoint}_steps.pkl")
@@ -129,7 +131,7 @@ def generate_expert_dataset(
 
     # Handle dataset naming and duplication
     if dataset_id is None:
-        dataset_id = f"dmc/{env_id}-alg_{algorithm}-act_rep_{action_repeat}-seg_{int(gen_segmentation)}/{skill_level}-v0"
+        dataset_id = f"dmc/{env_id}-alg_{algorithm}-act_{action_repeat}-seg_{int(gen_segmentation)}-rnd_{add_noise}/{skill_level}-v0"
 
     dataset_path = os.path.join(os.path.expanduser("~"), ".minari", "datasets", dataset_id)
     if dataset_id in list_local_datasets() or os.path.exists(dataset_path):
@@ -151,7 +153,14 @@ def generate_expert_dataset(
         os.makedirs(gif_dir, exist_ok=True)
 
     for _ in tqdm.tqdm(range(total_steps), desc=f"Generating dataset for {skill_level} skill level"):
-        action, _ = model.predict(obs, deterministic=False)
+        if np.random.random() >= 0.2 or not add_noise:
+            action, _ = model.predict(obs, deterministic=False)
+            action_det, _ = model.predict(obs, deterministic=True)
+            assert np.allclose(action, action_det), "Stochastic action deviates from deterministic action!"
+        else:
+            action = (np.random.random(size=env.action_space.shape) - 0.5) * 2
+            action = action.astype(np.float32)
+
         obs, reward, terminated, truncated, info = env.step(action)
         # print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")
 
@@ -207,6 +216,7 @@ def main():
     parser.add_argument("--save-to-gif", action="store_true")
     parser.add_argument("--action-repeat", type=int, default=1, help="Action repeat for the environment.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing datasets with the same ID.")
+    parser.add_argument("--add-noise", action="store_true", help="Add noise to expert actions.")
     args = parser.parse_args()
 
     for level in SKILL_LEVEL:
@@ -223,6 +233,7 @@ def main():
             action_repeat=args.action_repeat,
             save_to_gif=args.save_to_gif,
             overwrite=args.overwrite,
+            add_noise=args.add_noise,
         )
 
 
