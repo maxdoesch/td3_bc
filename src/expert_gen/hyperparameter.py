@@ -1,31 +1,64 @@
-import flax.nnx as nn
+#import flax.nnx as nn
+import torch.nn as nn
 from stable_baselines3.common.utils import get_linear_fn
 
 HYPERPARAMETERS = {
     "ppo": {
+        #"dmc_cheetah_run_1-v1": {
+        #    "normalize": True,
+        #    "n_envs": 1,
+        #    "policy": "MlpPolicy",
+        #    "n_timesteps": 1_000_000,
+        #    "batch_size": 64,
+        #    "n_steps": 512,
+        #    "gamma": 0.98,
+        #    "learning_rate": 2.0633e-05,
+        #    "ent_coef": 0.000401762,
+        #    "clip_range": 0.1,
+        #    "n_epochs": 20,
+        #    "gae_lambda": 0.92,
+        #    "max_grad_norm": 0.8,
+        #    "vf_coef": 0.58096,
+        #    "policy_kwargs": {
+        #        "log_std_init": -2,
+        #        "ortho_init": False,
+        #        "activation_fn": nn.ReLU,
+        #        "net_arch": {"pi": [256, 256], "vf": [256, 256]},
+        #    },
+        #    "normalize_kwargs": {"norm_obs": True, "norm_reward": True},
+        #    "env_kwargs": {"action_repeat": 4},
+        #},
         "dmc_cheetah_run_1-v1": {
             "normalize": True,
-            "n_envs": 1,
+            "n_envs": 4,
             "policy": "MlpPolicy",
             "n_timesteps": 1_000_000,
-            "batch_size": 64,
-            "n_steps": 512,
-            "gamma": 0.98,
-            "learning_rate": 2.0633e-05,
-            "ent_coef": 0.000401762,
-            "clip_range": 0.1,
-            "n_epochs": 20,
-            "gae_lambda": 0.92,
-            "max_grad_norm": 0.8,
-            "vf_coef": 0.58096,
+            "batch_size": 128,                     # SB3 default
+            "n_steps": 512,                      # SB3 default
+            "gamma": 0.98,                        # SB3 default
+            "learning_rate": 3e-5,                # SB3 default
+            "ent_coef": 0.0,                      # SB3 default
+            "clip_range": 0.2,                    # SB3 default
+            "n_epochs": 10,                       # SB3 default
+            "gae_lambda": 0.9,                   # SB3 default
+            "max_grad_norm": 0.5,                 # SB3 default
+            "vf_coef": 0.5,                       # SB3 default
+            "use_sde": False,                     # SB3 default
+            "sde_sample_freq": -1,                # SB3 default
+            "normalize_advantage": True,          # SB3 default
             "policy_kwargs": {
                 "log_std_init": -2,
-                "ortho_init": False,
-                "activation_fn": nn.relu,
-                "net_arch": {"pi": [256, 256], "vf": [256, 256]},
+                "ortho_init": True,               # SB3 default for PPO
+                "activation_fn": nn.Tanh,         # SB3 default for PPO
+                "net_arch": dict(pi=[64, 64], vf=[64, 64]),  # SB3 default
             },
-            "normalize_kwargs": {"norm_obs": True, "norm_reward": True},
-            "env_kwargs": {"action_repeat": 4},
+            "normalize_kwargs": {
+                "norm_obs": True,
+                "norm_reward": True,
+            },
+            "env_kwargs": {
+                "action_repeat": 4,
+            },
         },
         "dmc_hopper_run_1-v1": {
             "normalize": True,
@@ -45,7 +78,7 @@ HYPERPARAMETERS = {
             "policy_kwargs": {
                 "log_std_init": -2,
                 "ortho_init": False,
-                "activation_fn": nn.relu,
+                "activation_fn": nn.ReLU,
                 "net_arch": {"pi": [256, 256], "vf": [256, 256]},
             },
         },
@@ -67,7 +100,7 @@ HYPERPARAMETERS = {
             "policy_kwargs": {
                 "log_std_init": -2,
                 "ortho_init": False,
-                "activation_fn": nn.relu,
+                "activation_fn": nn.ReLU,
                 "net_arch": {"pi": [256, 256], "vf": [256, 256]},
             },
         },

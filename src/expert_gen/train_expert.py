@@ -8,7 +8,7 @@ import wandb
 # from sbx import PPO, TD3
 from stable_baselines3 import PPO, TD3
 from stable_baselines3.common.noise import NormalActionNoise
-from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize, SubprocVecEnv
 from stable_baselines3.common.callbacks import CallbackList, EvalCallback, CheckpointCallback
 from wandb.integration.sb3 import WandbCallback
 
@@ -44,9 +44,13 @@ def main():
     )
 
     run_path = os.path.join(args.output_dir, f"run-{args.env_id}-{run.id}")
+    os.makedirs(run_path, exist_ok=True)
+
+    with open(os.path.join(run_path, "hyperparameters.txt"), "w") as f:
+        f.write(str(hparams))
 
     # Training environment
-    train_env = DummyVecEnv([lambda: make_env(args.env_id, hparams["env_kwargs"]) for _ in range(hparams["n_envs"])])
+    train_env = SubprocVecEnv([lambda: make_env(args.env_id, hparams["env_kwargs"]) for _ in range(hparams["n_envs"])])
     train_env = VecMonitor(train_env, filename=os.path.join(run_path, "monitor.csv"))
     if hparams.get("normalize", False):
         train_env = VecNormalize(venv=train_env, gamma=hparams["gamma"], **hparams["normalize_kwargs"])
@@ -100,6 +104,7 @@ def main():
             vf_coef=hparams["vf_coef"],
             verbose=1,
             tensorboard_log=run_path,
+            device='cpu'
         )
     elif args.algorithm == "td3":
         n_actions = train_env.action_space.shape[-1]

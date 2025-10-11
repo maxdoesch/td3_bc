@@ -131,7 +131,8 @@ def generate_expert_dataset(
 
     # Handle dataset naming and duplication
     if dataset_id is None:
-        dataset_id = f"dmc/{env_id}-alg_{algorithm}-act_{action_repeat}-seg_{int(gen_segmentation)}-rnd_{add_noise}/{skill_level}-v0"
+        env_id_short = env_id.replace("dmc_", "").replace("_1-v1", "")
+        dataset_id = f"dmc/{env_id_short}-alg_{algorithm}-act_{action_repeat}-seg_{int(gen_segmentation)}-rnd_{int(add_noise)}/{skill_level}-v0"
 
     dataset_path = os.path.join(os.path.expanduser("~"), ".minari", "datasets", dataset_id)
     if dataset_id in list_local_datasets() or os.path.exists(dataset_path):
@@ -153,13 +154,14 @@ def generate_expert_dataset(
         os.makedirs(gif_dir, exist_ok=True)
 
     for _ in tqdm.tqdm(range(total_steps), desc=f"Generating dataset for {skill_level} skill level"):
-        if np.random.random() >= 0.2 or not add_noise:
+        if add_noise:
             action, _ = model.predict(obs, deterministic=False)
-            action_det, _ = model.predict(obs, deterministic=True)
-            assert np.allclose(action, action_det), "Stochastic action deviates from deterministic action!"
+
+            if algorithm == "td3":
+                noise = np.random.normal(0, 0.1, size=action.shape)
+                action = (action + noise).clip(-1, 1).astype(np.float32)
         else:
-            action = (np.random.random(size=env.action_space.shape) - 0.5) * 2
-            action = action.astype(np.float32)
+            action, _ = model.predict(obs, deterministic=True)
 
         obs, reward, terminated, truncated, info = env.step(action)
         # print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")
