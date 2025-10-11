@@ -407,7 +407,7 @@ class OfflineTrainer(Trainer):
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
+        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
 
         self._fill_replay_buffer()
 
@@ -464,7 +464,7 @@ class OnlineTrainer(Trainer):
         self.episode_starts = np.zeros(n_envs, dtype=np.bool)
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
+        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
 
         if self.cfg.pretrain_dir.endswith("/"):
             self.cfg.pretrain_dir = self.cfg.pretrain_dir[:-1]

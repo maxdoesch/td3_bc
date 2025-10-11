@@ -13,6 +13,44 @@ import td3_bc.utils as utils
 def normalize(array: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, eps: float = 1e-3):
     return (array - mean) / (std + eps)
 
+class RandomPartialRPermutation:
+    def __init__(self, generator: Optional[torch.Generator] = None):
+        """
+        Args:
+            generator: Optional torch.Generator for reproducible shuffling.
+        """
+        self.generator = generator
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_tensor(x):
+            raise TypeError(f"Expected a torch.Tensor, got {type(x)}")
+        
+        if x.ndim == 6:
+            # (B, F, R, C, H, W)
+            r_dim = 2
+        elif x.ndim == 5:
+            # (B, R, C, H, W)
+            r_dim = 1
+        else:
+            raise ValueError(
+                f"Unsupported tensor shape {tuple(x.shape)}. "
+                "Expected 4D (R, C, H, W) or 5D (F, R, C, H, W)."
+            )
+
+        R = x.shape[r_dim]
+        if R < 2:
+            return x  # nothing to shuffle
+
+        # Indices 0..R-2 shuffled, R-1 kept at the end
+        perm_first = torch.randperm(R - 1, generator=self.generator, device=x.device)
+        perm = torch.cat([perm_first, torch.tensor([R - 1], device=x.device)])
+
+        # Index along the R dimension
+        return x.index_select(dim=r_dim, index=perm)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(generator={self.generator})"
+
 
 class ReplayBuffer:
     def __init__(
@@ -20,6 +58,7 @@ class ReplayBuffer:
         obs_shape: Union[int, Tuple[int, ...]],
         action_dim: int,
         max_size: int = int(1e6),
+        frame_stack: int = 1,
         device: Optional[str] = None,
         augmentations: bool = True,
     ):
@@ -36,13 +75,10 @@ class ReplayBuffer:
 
         self.is_image_obs = len(self.obs_shape) >= 2
         self.max_size = (
-            int(1e5) if self.is_image_obs else max_size
+            min(int(1e3), max_size) if self.is_image_obs else max_size
         )  # hack to avoid MemoryError with large image buffers
 
-        self.frame_stack = 1
-        if self.is_image_obs and len(self.obs_shape) >= 4:
-            self.frame_stack = self.obs_shape[0]
-            self.obs_shape = self.obs_shape[1:] if self.frame_stack == 1 else self.obs_shape
+        self.frame_stack = frame_stack
 
         obs_dtype = torch.uint8 if self.is_image_obs else torch.float32
         self.obs = torch.zeros((self.max_size,) + self.obs_shape, dtype=obs_dtype, device="cpu")
@@ -68,6 +104,7 @@ class ReplayBuffer:
             self.augmentations = T.Compose(
                 [
                     T.RandomCrop(self.obs_shape[-2:], padding=4, padding_mode="constant"),
+                    RandomPartialRPermutation() if len(self.obs_shape) >= 4 else T.Lambda(lambda x: x),
                 ]
             )
         else:
@@ -411,7 +448,7 @@ if __name__ == "__main__":
 
     frame_stack = 3
     obs_shape = (3, 64, 64)
-    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5), augmentations=False)
+    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5), frame_stack=frame_stack, augmentations=False)
     print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
 
     episode_length = 1000
@@ -444,3 +481,41 @@ if __name__ == "__main__":
     assert torch.allclose(
         torch.stack([255 * batch["obs"][0, 0] + i for i in range(frame_stack)]), 255 * batch["obs"][0]
     ), "Stacked observations do not match expected values"
+
+    print("---------------------------------------------------------")
+
+    regions = 11
+    obs_shape = (regions, 3, 64, 64)
+    buffer = ReplayBuffer(obs_shape, action_dim, max_size=int(1e5), augmentations=True)
+    print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
+
+    episodes = 1
+    episode_length = 1000
+    dict_dataset = {
+        "obs": [
+            np.tile(
+                np.arange(regions).reshape(1, regions, *([1] * (len(obs_shape) - 1))),
+                (episode_length + 1, 1, *obs_shape[1:])
+            )
+            for _ in range(episodes)
+        ],
+        "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
+        "rews": [np.random.randn(episode_length) for _ in range(episodes)],
+        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
+    }
+
+    buffer.convert_dict(dict_dataset)
+    print("Buffer size after converting dictionary dataset with complex shapes:", buffer.size)
+    print("Buffer pointer after converting dictionary dataset with complex shapes:", buffer.ptr)
+
+    mean, std = buffer.compute_dataset_statistics()
+    buffer.set_dataset_statistics(mean, std)
+
+    batch = buffer.sample(batch_size=256)
+    print("Sampled batch:")
+    for key, value in batch.items():
+        print(f"{key}: {value.shape}")
+
+    for i in range(regions):
+        print(f"Region {i}:")
+        print(batch["obs"][0, i, 0, 5:7, 5:7] * 255)
