@@ -1,5 +1,9 @@
 import gymnasium as gym
 import numpy as np
+import torch
+from torchvision.transforms import functional, RandomCrop
+from typing import Optional
+
 
 
 def is_image_space(space: gym.Space) -> bool:
@@ -55,3 +59,96 @@ def uncombine_stacked_frames(observation: np.ndarray) -> np.ndarray:
     observation = observation.squeeze()
 
     return observation
+
+
+class RandomCropDual(RandomCrop):
+    def _do_padding(self, img: torch.Tensor) -> torch.Tensor:
+        if self.padding is not None:
+            img = functional.pad(img, self.padding, self.fill, self.padding_mode)
+
+        _, height, width = functional.get_dimensions(img)
+        # pad the width if needed
+        if self.pad_if_needed and width < self.size[1]:
+            padding = [self.size[1] - width, 0]
+            img = functional.pad(img, padding, self.fill, self.padding_mode)
+        # pad the height if needed
+        if self.pad_if_needed and height < self.size[0]:
+            padding = [0, self.size[0] - height]
+            img = functional.pad(img, padding, self.fill, self.padding_mode)
+
+        return img
+
+    def forward(self, img):
+        """
+        Args:
+            img: Image(s) to be cropped.
+
+        Returns:
+            Tensor: Cropped image(s).
+        """
+
+        if isinstance(img, (tuple, list)):
+            img, img2 = img[0], img[1]
+        else:
+            img2 = None
+        
+        img = self._do_padding(img)
+        if img2 is not None:
+            img2 = self._do_padding(img2)
+
+        i, j, h, w = self.get_params(img, self.size)
+
+        img = functional.crop(img, i, j, h, w)
+        if img2 is not None:
+            img2 = functional.crop(img2, i, j, h, w)
+            return img, img2
+
+        return img
+    
+
+class RandomPartialRPermutation:
+    def __init__(self, generator: Optional[torch.Generator] = None):
+        """
+        Args:
+            generator: Optional torch.Generator for reproducible shuffling.
+        """
+        self.generator = generator
+
+    def _find_r_dim(self, x: torch.Tensor) -> int:
+        if x.ndim == 6:
+            # (B, F, R, C, H, W)
+            r_dim = 2
+        elif x.ndim == 5:
+            # (B, R, C, H, W)
+            r_dim = 1
+        else:
+            raise ValueError(
+                f"Unsupported tensor shape {tuple(x.shape)}. "
+                "Expected 4D (R, C, H, W) or 5D (F, R, C, H, W)."
+            )
+        return r_dim
+
+    def __call__(self, img) -> torch.Tensor:
+        if isinstance(img, (tuple, list)):
+            img, img2 = img[0], img[1]
+        else:
+            img2 = None
+        
+        r_dim = self._find_r_dim(img)
+
+        R = img.shape[r_dim]
+
+        # Indices 0..R-2 shuffled, R-1 kept at the end
+        perm_first = torch.randperm(R - 1, generator=self.generator, device=img.device)
+        perm = torch.cat([perm_first, torch.tensor([R - 1], device=img.device)])
+
+        # Index along the R dimension
+        img = img.index_select(dim=r_dim, index=perm)
+        if img2 is not None:
+            img2 = img2.index_select(dim=r_dim, index=perm)
+            return img, img2
+        
+        return img
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(generator={self.generator})"

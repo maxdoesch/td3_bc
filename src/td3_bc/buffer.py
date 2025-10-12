@@ -13,45 +13,6 @@ import td3_bc.utils as utils
 def normalize(array: torch.Tensor, mean: torch.Tensor, std: torch.Tensor, eps: float = 1e-3):
     return (array - mean) / (std + eps)
 
-class RandomPartialRPermutation:
-    def __init__(self, generator: Optional[torch.Generator] = None):
-        """
-        Args:
-            generator: Optional torch.Generator for reproducible shuffling.
-        """
-        self.generator = generator
-
-    def __call__(self, x: torch.Tensor) -> torch.Tensor:
-        if not torch.is_tensor(x):
-            raise TypeError(f"Expected a torch.Tensor, got {type(x)}")
-        
-        if x.ndim == 6:
-            # (B, F, R, C, H, W)
-            r_dim = 2
-        elif x.ndim == 5:
-            # (B, R, C, H, W)
-            r_dim = 1
-        else:
-            raise ValueError(
-                f"Unsupported tensor shape {tuple(x.shape)}. "
-                "Expected 4D (R, C, H, W) or 5D (F, R, C, H, W)."
-            )
-
-        R = x.shape[r_dim]
-        if R < 2:
-            return x  # nothing to shuffle
-
-        # Indices 0..R-2 shuffled, R-1 kept at the end
-        perm_first = torch.randperm(R - 1, generator=self.generator, device=x.device)
-        perm = torch.cat([perm_first, torch.tensor([R - 1], device=x.device)])
-
-        # Index along the R dimension
-        return x.index_select(dim=r_dim, index=perm)
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(generator={self.generator})"
-
-
 class ReplayBuffer:
     def __init__(
         self,
@@ -103,8 +64,8 @@ class ReplayBuffer:
         if self.is_image_obs and augmentations:
             self.augmentations = T.Compose(
                 [
-                    T.RandomCrop(self.obs_shape[-2:], padding=4, padding_mode="constant"),
-                    RandomPartialRPermutation() if len(self.obs_shape) >= 4 else T.Lambda(lambda x: x),
+                    utils.RandomCropDual(self.obs_shape[-2:], padding=4, padding_mode="constant"),
+                    utils.RandomPartialRPermutation() if len(self.obs_shape) >= 4 else T.Lambda(lambda x: x),
                 ]
             )
         else:
@@ -197,8 +158,7 @@ class ReplayBuffer:
         not_done = self._staging["not_done"].to(self.device, non_blocking=True)
 
         if self.is_image_obs and self.augmentations:
-            obs = self.augmentations(obs)
-            next_obs = self.augmentations(next_obs)
+            obs, next_obs = self.augmentations((obs, next_obs))
 
         obs_norm = normalize(obs, self.obs_mean, self.obs_std)
         next_obs_norm = normalize(next_obs, self.obs_mean, self.obs_std)
@@ -421,7 +381,7 @@ if __name__ == "__main__":
 
     print("---------------------------------------------------------")
 
-    obs_shape = (32, 32, 3)
+    obs_shape = (3, 32, 32)
     buffer = ReplayBuffer(obs_shape, action_dim, max_size=int(1e6))
     print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
 
@@ -516,6 +476,10 @@ if __name__ == "__main__":
     for key, value in batch.items():
         print(f"{key}: {value.shape}")
 
-    for i in range(regions):
-        print(f"Region {i}:")
-        print(batch["obs"][0, i, 0, 5:7, 5:7] * 255)
+    for b in range(3):
+        print(f"Batch element {b}:")
+        for i in range(regions):
+            print(f"Region {i}:")
+            print(batch["obs"][b, i, 0, :4, :4] * 255)
+            print(batch["next_obs"][b, i, 0, :4, :4] * 255)
+        print("="*20)

@@ -28,6 +28,7 @@ ftd = [
     "onnxsim>=0.4.36",
     "timm>=1.0.19",
     "torchpack>=0.3.1",
+    "wandb[media]>=0.21.0",
 ]
 
 [build-system]

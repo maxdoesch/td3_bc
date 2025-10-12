@@ -23,7 +23,7 @@ class Metric(ABC):
         pass
 
     @abstractmethod
-    def step(self, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
+    def step(self, obs: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
         pass
 
     @abstractmethod
@@ -43,7 +43,7 @@ class RewardAndLengthMetric(Metric):
         self.episode_rewards = []
         self.episode_lengths = []
 
-    def step(self, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
+    def step(self, obs: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
         self.current_rewards = (
             np.zeros_like(rewards) if self.current_rewards is None else self.current_rewards + rewards
         )
@@ -137,7 +137,7 @@ class Evaluator:
             obs, rewards, terminated, truncated, infos = self.envs.step(actions)
 
             dones = np.logical_or(terminated, truncated)
-            self.metric.step(rewards, dones, infos)
+            self.metric.step(obs, rewards, dones, infos)
 
             for i in range(self.n_envs):
                 if dones[i] and episode_counts[i] < episode_targets[i]:
