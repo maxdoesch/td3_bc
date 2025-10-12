@@ -101,6 +101,7 @@ def main():
             use_sde=hparams.get("use_sde", False),
             sde_sample_freq=hparams.get("sde_sample_freq", 4),
             policy_kwargs=hparams["policy_kwargs"],
+            normalize_advantage=hparams.get("normalize_advantage", True),
             vf_coef=hparams["vf_coef"],
             verbose=1,
             tensorboard_log=run_path,
