@@ -65,7 +65,7 @@ class ReplayBuffer:
             self.augmentations = T.Compose(
                 [
                     utils.RandomCropDual(self.obs_shape[-2:], padding=4, padding_mode="constant"),
-                    utils.RandomPartialRPermutation() if len(self.obs_shape) >= 4 else T.Lambda(lambda x: x),
+                    utils.RandomPartialRPermutation() if len(self.obs_shape) > 4 else T.Lambda(lambda x: x),
                 ]
             )
         else:
