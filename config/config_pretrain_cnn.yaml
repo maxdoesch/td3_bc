@@ -1,7 +1,7 @@
 train_steps: 1000000
-eval_freq: 5000
+eval_freq: 25000
 eval_episodes: 10
-checkpoint_freq: 25000
+checkpoint_freq: 50000
 batch_size: 64
 
 seeds: 42
@@ -12,9 +12,9 @@ checkpoint_dir: ./checkpoints
 
 #experiment_name: <optional>
 
-dataset_path: dmc/dmc_background_cheetah_run_1-v1-action_repeat_4/expert-v0
+dataset_path: dmc/distraction_cheetah_run-alg_td3-act_4-seg_0-rnd_0/expert-v0
 
-env_name: dmc_background_cheetah_run_1-v1
+env_name: dmc_distraction_cheetah_run_1-v1
 num_envs: 1
 env_kwargs:
   channels_first: True

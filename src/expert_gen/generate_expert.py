@@ -104,7 +104,6 @@ def generate_expert_dataset(
         env_config = FTDObservationWrapperConfig(
             sam_config=sam_config,
             add_original_frame=True,
-            sort_by="score",
         )
         env = FTDObservationWrapper(env, config=env_config)
         env = ResizeObservation(env, shape=(image_size, image_size), is_channels_first=True)
@@ -154,14 +153,10 @@ def generate_expert_dataset(
         os.makedirs(gif_dir, exist_ok=True)
 
     for _ in tqdm.tqdm(range(total_steps), desc=f"Generating dataset for {skill_level} skill level"):
-        if add_noise:
-            action, _ = model.predict(obs, deterministic=False)
+        action, _ = model.predict(obs, deterministic=True)
 
-            if algorithm == "td3":
-                noise = np.random.normal(0, 0.1, size=action.shape)
-                action = (action + noise).clip(-1, 1).astype(np.float32)
-        else:
-            action, _ = model.predict(obs, deterministic=True)
+        noise = np.random.normal(0, add_noise, size=action.shape)
+        action = (action + noise).clip(-1, 1).astype(np.float32)
 
         obs, reward, terminated, truncated, info = env.step(action)
         # print(f"Reward: {reward}, Cumulative Reward: {cumulative_reward}")
@@ -218,7 +213,7 @@ def main():
     parser.add_argument("--save-to-gif", action="store_true")
     parser.add_argument("--action-repeat", type=int, default=1, help="Action repeat for the environment.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing datasets with the same ID.")
-    parser.add_argument("--add-noise", action="store_true", help="Add noise to expert actions.")
+    parser.add_argument("--add-noise", type=float, default=0.0, help="Add noise to expert actions.")
     args = parser.parse_args()
 
     for level in SKILL_LEVEL:

@@ -12,7 +12,7 @@ checkpoint_dir: ./checkpoints
 
 #experiment_name: <optional>
 
-dataset_path: dmc/cheetah_run-alg_ppo-act_4-seg_1-rnd_1/expert-v0
+dataset_path: dmc/distraction_cheetah_run-alg_ppo-act_4-seg_1-rnd_0/expert-v0
 
 env_name: dmc_distraction_cheetah_run_1-v1
 num_envs: 1

@@ -408,7 +408,7 @@ if __name__ == "__main__":
 
     frame_stack = 3
     obs_shape = (3, 64, 64)
-    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5), frame_stack=frame_stack, augmentations=False)
+    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e5), frame_stack=frame_stack, augmentations=True)
     print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
 
     episode_length = 1000
@@ -435,18 +435,58 @@ if __name__ == "__main__":
     for key, value in batch.items():
         print(f"{key}: {value.shape}")
 
-    assert torch.allclose(255 * batch["obs"][0] + 1, 255 * batch["next_obs"][0]), (
+    assert torch.allclose(255 * batch["obs"][0][:, :, 4:-4, 4:-4] + 1, 255 * batch["next_obs"][0][:, :, 4:-4, 4:-4]), (
         "Observation and next observation do not match"
     )
     assert torch.allclose(
-        torch.stack([255 * batch["obs"][0, 0] + i for i in range(frame_stack)]), 255 * batch["obs"][0]
+        torch.stack([255 * batch["obs"][0, 0][:, 4:-4, 4:-4] + i for i in range(frame_stack)]), 255 * batch["obs"][0][:, :, 4:-4, 4:-4]
     ), "Stacked observations do not match expected values"
 
     print("---------------------------------------------------------")
 
+    frame_stack = 3
     regions = 11
     obs_shape = (regions, 3, 64, 64)
-    buffer = ReplayBuffer(obs_shape, action_dim, max_size=int(1e5), augmentations=True)
+    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e4), frame_stack=frame_stack, augmentations=True)
+    print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
+
+    episode_length = 1000
+    dict_dataset = {
+        "obs": [
+            np.broadcast_to(
+                np.arange(episode_length + 1).reshape(-1, *([1] * len(obs_shape))), (episode_length + 1, *obs_shape)
+            )
+            for _ in range(episodes)
+        ],
+        "acts": [np.random.randn(episode_length, action_dim) for _ in range(episodes)],
+        "rews": [np.random.randn(episode_length) for _ in range(episodes)],
+        "dones": [np.random.randint(0, 2, size=episode_length) for _ in range(episodes)],
+    }
+    buffer.convert_dict(dict_dataset)
+    print("Buffer size after converting dictionary dataset with complex shapes:", buffer.size)
+    print("Buffer pointer after converting dictionary dataset with complex shapes:", buffer.ptr)
+
+    mean, std = buffer.compute_dataset_statistics()
+    buffer.set_dataset_statistics(mean, std)
+
+    batch = buffer.sample(batch_size=256)
+    print("Sampled batch:")
+    for key, value in batch.items():
+        print(f"{key}: {value.shape}")
+
+    assert torch.allclose(255 * batch["obs"][0][:, :, :, 4:-4, 4:-4] + 1, 255 * batch["next_obs"][0][:, :, :, 4:-4, 4:-4]), (
+        "Observation and next observation do not match"
+    )
+    assert torch.allclose(
+        torch.stack([255 * batch["obs"][0, 0][:, :, 4:-4, 4:-4] + i for i in range(frame_stack)]), 255 * batch["obs"][0][:, :, :, 4:-4, 4:-4]
+    ), "Stacked observations do not match expected values"
+
+    print("---------------------------------------------------------")
+
+    frame_stack = 3
+    regions = 11
+    obs_shape = (regions, 3, 64, 64)
+    buffer = ReplayBuffer((frame_stack, *obs_shape), action_dim, max_size=int(1e4), frame_stack=frame_stack, augmentations=True)
     print("Replay buffer initialized with obs_shape:", buffer.obs_shape, "and action_dim:", buffer.action_dim)
 
     episodes = 1
@@ -478,8 +518,8 @@ if __name__ == "__main__":
 
     for b in range(3):
         print(f"Batch element {b}:")
-        for i in range(regions):
-            print(f"Region {i}:")
-            print(batch["obs"][b, i, 0, :4, :4] * 255)
-            print(batch["next_obs"][b, i, 0, :4, :4] * 255)
+        for j in range(regions):
+            print(f"Region {j}:")
+            print(batch["obs"][b, 0, j, 0, 4:6, 4:6] * 255)
+            print(batch["next_obs"][b, 0, j, 0, 4:6, 4:6] * 255)
         print("="*20)

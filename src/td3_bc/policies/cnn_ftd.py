@@ -24,6 +24,7 @@ class CnnFtdEncoder(nn.Module):
     def __init__(self, obs_shape: Tuple[int, ...], frame_stack: int, cfg: CnnFtdEncoderConfig):
         super().__init__()
 
+        self.frame_stack = frame_stack
         self.input_shape, self.num_channels, region_num = identify_obs_shape(obs_shape, frame_stack)
 
         self.image_attention_selector = ImageAttentionSelectorLayers(
@@ -59,8 +60,15 @@ class CnnFtdEncoder(nn.Module):
     def select_image(self, obs: torch.Tensor):
         with torch.no_grad():
             obs = self.image_attention_selector(obs.unsqueeze(0))  # Add batch dimension
-            obs = obs.squeeze()[-self.num_channels :]
-            obs = obs.permute(1, 2, 0)  # Convert to (H, W, C) format
-            obs = (255 * obs).to(torch.uint8)  # Convert to uint8 format
+            obs = obs.squeeze(0)  # Remove batch dimension
+
+            # obs shape: (F*C, H, W)
+            F, C, H, W = self.frame_stack, self.num_channels, *obs.shape[-2:]
+
+            obs = obs.view(F, C, H, W)
+            # Convert to (H, F*W, C)
+            obs = obs.permute(2, 0, 3, 1).reshape(H, F * W, C)
+
+            obs = (255 * obs).to(torch.uint8)
 
         return obs.cpu().numpy()
