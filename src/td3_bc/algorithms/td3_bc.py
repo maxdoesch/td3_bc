@@ -124,7 +124,28 @@ class TD3BC_Base(BaseAgent):
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        return critic_loss.item(), current_Q1.mean().item(), current_Q2.mean().item()
+        with torch.no_grad():
+            td1 = (current_Q1 - target_Q)
+            td2 = (current_Q2 - target_Q)
+            q_gap = (current_Q1 - current_Q2)
+
+            # Q disagreement sign mismatch
+            sign_mismatch = ((current_Q1 > 0) ^ (current_Q2 > 0)).float().mean()
+
+            metrics = {
+                "critic/loss": critic_loss.item(),
+                "critic/td_abs_mean": 0.5 * (td1.abs().mean() + td2.abs().mean()).item(),
+                "critic/td_abs_p95": torch.quantile(torch.cat([td1.abs().flatten(), td2.abs().flatten()]), 0.95).item(),
+                "critic/avg_q1": current_Q1.mean().item(),
+                "critic/avg_q2": current_Q2.mean().item(),
+                "critic/q_gap_mean": q_gap.mean().item(),
+                "critic/q_gap_std": q_gap.std().item(),
+                "critic/q_sign_mismatch": sign_mismatch.item(),
+                "target/mean": target_Q.mean().item(),
+                "target/std": target_Q.std().item(),
+            }
+
+        return critic_loss.item(), current_Q1.mean().item(), current_Q2.mean().item(), metrics
 
     def update_actor(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[np.ndarray, float, float, float]:
         # Compute actor loss
