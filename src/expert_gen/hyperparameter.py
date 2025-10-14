@@ -12,7 +12,7 @@ HYPERPARAMETERS = {
             "batch_size": 256,                     # SB3 default
             "n_steps": 512,                         # SB3 default
             "gamma": 0.98,                          # SB3 default
-            "learning_rate": get_linear_fn(start=1e-3, end=1e-4, end_fraction=1.0),
+            "learning_rate": get_linear_fn(start=5e-4, end=1e-4, end_fraction=1.0),
             "ent_coef": 0.0,                      # SB3 default
             "clip_range": 0.2,                    # SB3 default
             "n_epochs": 10,                       # SB3 default
@@ -33,7 +33,7 @@ HYPERPARAMETERS = {
                 "norm_reward": True,
             },
             "env_kwargs": {
-                "action_repeat": 4,
+                "action_repeat": 2,
             },
         },
         "dmc_hopper_run_1-v1": {

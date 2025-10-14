@@ -205,8 +205,18 @@ class MobileSAMV2:
             labels = labels[keep]
 
         # Get boxes from masks
-        if pred_masks.numel() == 0:
+        #if pred_masks.numel() == 0:
+        #    return None
+
+        # Filter out empty masks (no True pixels) BEFORE masks_to_boxes
+        if pred_masks.ndim != 3 or pred_masks.shape[0] == 0:
             return None
+        valid = pred_masks.view(pred_masks.shape[0], -1).any(dim=1)
+        if not torch.any(valid):
+            return None
+        pred_masks = pred_masks[valid]
+        scores = scores[valid]
+        labels = labels[valid]
 
         pred_boxes = masks_to_boxes(pred_masks)  # (N, 4)
 

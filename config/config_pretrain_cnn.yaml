@@ -1,5 +1,5 @@
 train_steps: 1000000
-eval_freq: 25000
+eval_freq: 10000
 eval_episodes: 10
 checkpoint_freq: 50000
 batch_size: 64
@@ -12,7 +12,7 @@ checkpoint_dir: ./checkpoints
 
 #experiment_name: <optional>
 
-dataset_path: dmc/distraction_cheetah_run-alg_td3-act_4-seg_0-rnd_0/expert-v0
+dataset_path: dmc/distraction_cheetah_run-alg_ppo-act_2-seg_0-rnd_0/mixed-v0
 
 env_name: dmc_distraction_cheetah_run_1-v1
 num_envs: 1
@@ -21,6 +21,7 @@ env_kwargs:
   height: 64
   width: 64
   action_repeat: 4
+  is_train: False
 frame_stack: 3
 
 train_mode:
