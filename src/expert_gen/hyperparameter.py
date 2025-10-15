@@ -99,8 +99,32 @@ HYPERPARAMETERS = {
             policy="MlpPolicy",
             policy_kwargs=dict(net_arch=dict(pi=[64, 64], vf=[64, 64]), ortho_init=True),
             n_timesteps=1_000_000,
-            gamma_eval=0.99,
-            env_kwargs=dict(action_repeat=1),
+            env_kwargs=dict(action_repeat=4),
+        ),
+        "dmc_cartpole_swingup_1-v1": dict(
+            n_envs=16,
+            normalize=True,
+            normalize_kwargs=dict(norm_obs=True, norm_reward=True),
+            n_steps=512,  # per env → 16*1024 =  rollout batch
+            batch_size=2048,
+            n_epochs=10,
+            learning_rate=4e-4,
+            gamma=0.98,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            vf_coef=0.5,
+            ent_coef=0.0,  # optional: 1e-3 if exploration is too timid
+            max_grad_norm=0.5,
+            use_sde=True,  # helps on small state tasks
+            sde_sample_freq=4,
+            policy="MlpPolicy",
+            policy_kwargs=dict(
+                net_arch=dict(pi=[64, 64], vf=[64, 64]),
+                activation_fn=nn.Tanh,
+                log_std_init=-0.5,
+                ortho_init=True),
+            n_timesteps=1_000_000,
+            env_kwargs=dict(action_repeat=4),
         ),
     },
     "td3": {

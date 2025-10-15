@@ -132,6 +132,8 @@ def generate_expert_dataset(
     if dataset_id is None:
         env_id_short = env_id.replace("dmc_", "").replace("_1-v1", "")
         dataset_id = f"dmc/{env_id_short}-alg_{algorithm}-act_{action_repeat}-seg_{int(gen_segmentation)}-rnd_{int(add_noise)}/{skill_level}-v0"
+    else:
+        dataset_id = f'{dataset_id}/{skill_level}-v0'
 
     dataset_path = os.path.join(os.path.expanduser("~"), ".minari", "datasets", dataset_id)
     if dataset_id in list_local_datasets() or os.path.exists(dataset_path):
