@@ -152,6 +152,9 @@ class MobileSAMV2:
 
         self.predictor.set_image(image)
 
+        if obj_results is None:
+            return None
+
         # Get bounding boxes and associated scores and labels
         input_boxes = obj_results[0].boxes.xyxy  # (N, 4)
         scores = obj_results[0].boxes.conf  # (N,)
