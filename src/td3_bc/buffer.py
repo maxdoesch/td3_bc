@@ -66,6 +66,8 @@ class ReplayBuffer:
                 [
                     utils.RandomCropDual(self.obs_shape[-2:], padding=4, padding_mode="constant"),
                     utils.RandomPartialRPermutation() if len(self.obs_shape) > 4 else T.Lambda(lambda x: x),
+                    utils.ColorJitterDual(brightness=0.4, contrast=0.4, saturation=0.4),
+                    utils.RandomErasingDual(p=0.5, scale=(0.02, 0.25), ratio=(0.3, 3.3), value=0)
                 ]
             )
         else:
@@ -157,11 +159,11 @@ class ReplayBuffer:
         reward = self._staging["reward"].to(self.device, non_blocking=True)
         not_done = self._staging["not_done"].to(self.device, non_blocking=True)
 
-        if self.is_image_obs and self.augmentations:
-            obs, next_obs = self.augmentations((obs, next_obs))
-
         obs_norm = normalize(obs, self.obs_mean, self.obs_std)
         next_obs_norm = normalize(next_obs, self.obs_mean, self.obs_std)
+
+        if self.is_image_obs and self.augmentations:
+            obs_norm, next_obs_norm = self.augmentations((obs_norm, next_obs_norm))
 
         return {
             "obs": obs_norm,
