@@ -262,52 +262,6 @@ class RandomErasingDual:
         self.value = value
         self.generator = generator
 
-
-    #@torch.no_grad()
-    #def __call__(self, img):
-    #    """
-    #    obs/next_obs: (B, F, R, C, H, W) in [0,1]
-    #    Returns augmented (obs_aug, next_obs_aug) with identical params per (b,f,r).
-    #    """
-    #    if isinstance(img, (tuple, list)):
-    #        img, img2 = img[0], img[1]
-    #    else:
-    #        img2 = None
-#
-    #    assert img.shape == img2.shape
-    #    assert img.dtype == img2.dtype and img.is_floating_point()
-    #    B, F, R, C, H, W = img.shape
-#
-    #    out1 = img.clone()
-    #    out2 = img2.clone()
-#
-    #    area = H * W
-#
-    #    for b in range(B):
-    #        for f in range(F):
-    #            for r in range(R):
-    #                if torch.rand(1, generator=self.generator) > self.p:
-    #                    continue
-#
-    #                # sample erasing rectangle
-    #                log_ratio = torch.log(torch.tensor(self.ratio))
-    #                for _ in range(10):  # try a few times to find a valid rectangle
-    #                    erase_area = area * torch.empty(1).uniform_(self.scale[0], self.scale[1], generator=self.generator).item()
-    #                    aspect_ratio = torch.exp(torch.empty(1).uniform_(log_ratio[0], log_ratio[1], generator=self.generator)).item()
-    #                    h = int(round(math.sqrt(erase_area * aspect_ratio)))
-    #                    w = int(round(math.sqrt(erase_area / aspect_ratio)))
-    #                    if not (h < H and w < W):
-    #                        continue
-#
-    #                    i = torch.randint(0, H - h + 1, size=(1,)).item()
-    #                    j = torch.randint(0, W - w + 1, size=(1,)).item()
-#
-    #                    # apply same to both
-    #                    out1[b, f, r, :, i:i+h, j:j+w] = self.value
-    #                    out2[b, f, r, :, i:i+h, j:j+w] = self.value
-#
-    #    return out1, out2
-    
     @torch.no_grad()
     def __call__(self, img):
         # Expect a tuple/list (img, img2) and apply exactly the same rectangles to both

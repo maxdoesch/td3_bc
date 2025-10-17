@@ -91,6 +91,8 @@ def generate_expert_dataset(
     env_kwargs["action_repeat"] = action_repeat
     if "distraction" in env_id:
         env_kwargs["is_train"] = True
+    if 'background' in env_id:
+        env_kwargs["background_color"] = "black"
 
     # Build env
     env = gym.make(
