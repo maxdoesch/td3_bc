@@ -262,89 +262,139 @@ class RandomErasingDual:
         self.value = value
         self.generator = generator
 
-    @staticmethod
-    def get_params(
-        img: torch.Tensor, scale: tuple[float, float], ratio: tuple[float, float], value: Optional[list[float]] = None
-    ) -> tuple[int, int, int, int, torch.Tensor]:
-        """Get parameters for ``erase`` for a random erasing.
 
-        Args:
-            img (Tensor): Tensor image to be erased.
-            scale (sequence): range of proportion of erased area against input image.
-            ratio (sequence): range of aspect ratio of erased area.
-            value (list, optional): erasing value. If None, it is interpreted as "random"
-                (erasing each pixel with random values). If ``len(value)`` is 1, it is interpreted as a number,
-                i.e. ``value[0]``.
-
-        Returns:
-            tuple: params (i, j, h, w, v) to be passed to ``erase`` for random erasing.
-        """
-        img_c, img_h, img_w = img.shape[-3], img.shape[-2], img.shape[-1]
-        area = img_h * img_w
-
-        log_ratio = torch.log(torch.tensor(ratio))
-        for _ in range(10):
-            erase_area = area * torch.empty(1).uniform_(scale[0], scale[1]).item()
-            aspect_ratio = torch.exp(torch.empty(1).uniform_(log_ratio[0], log_ratio[1])).item()
-
-            h = int(round(math.sqrt(erase_area * aspect_ratio)))
-            w = int(round(math.sqrt(erase_area / aspect_ratio)))
-            if not (h < img_h and w < img_w):
-                continue
-
-            if value is None:
-                v = torch.empty([img_c, h, w], dtype=torch.float32).normal_()
-            else:
-                v = torch.tensor(value)[:, None, None]
-
-            i = torch.randint(0, img_h - h + 1, size=(1,)).item()
-            j = torch.randint(0, img_w - w + 1, size=(1,)).item()
-            return i, j, h, w, v
-            
-
+    #@torch.no_grad()
+    #def __call__(self, img):
+    #    """
+    #    obs/next_obs: (B, F, R, C, H, W) in [0,1]
+    #    Returns augmented (obs_aug, next_obs_aug) with identical params per (b,f,r).
+    #    """
+    #    if isinstance(img, (tuple, list)):
+    #        img, img2 = img[0], img[1]
+    #    else:
+    #        img2 = None
+#
+    #    assert img.shape == img2.shape
+    #    assert img.dtype == img2.dtype and img.is_floating_point()
+    #    B, F, R, C, H, W = img.shape
+#
+    #    out1 = img.clone()
+    #    out2 = img2.clone()
+#
+    #    area = H * W
+#
+    #    for b in range(B):
+    #        for f in range(F):
+    #            for r in range(R):
+    #                if torch.rand(1, generator=self.generator) > self.p:
+    #                    continue
+#
+    #                # sample erasing rectangle
+    #                log_ratio = torch.log(torch.tensor(self.ratio))
+    #                for _ in range(10):  # try a few times to find a valid rectangle
+    #                    erase_area = area * torch.empty(1).uniform_(self.scale[0], self.scale[1], generator=self.generator).item()
+    #                    aspect_ratio = torch.exp(torch.empty(1).uniform_(log_ratio[0], log_ratio[1], generator=self.generator)).item()
+    #                    h = int(round(math.sqrt(erase_area * aspect_ratio)))
+    #                    w = int(round(math.sqrt(erase_area / aspect_ratio)))
+    #                    if not (h < H and w < W):
+    #                        continue
+#
+    #                    i = torch.randint(0, H - h + 1, size=(1,)).item()
+    #                    j = torch.randint(0, W - w + 1, size=(1,)).item()
+#
+    #                    # apply same to both
+    #                    out1[b, f, r, :, i:i+h, j:j+w] = self.value
+    #                    out2[b, f, r, :, i:i+h, j:j+w] = self.value
+#
+    #    return out1, out2
+    
     @torch.no_grad()
     def __call__(self, img):
-        """
-        obs/next_obs: (B, F, R, C, H, W) in [0,1]
-        Returns augmented (obs_aug, next_obs_aug) with identical params per (b,f,r).
-        """
+        # Expect a tuple/list (img, img2) and apply exactly the same rectangles to both
         if isinstance(img, (tuple, list)):
             img, img2 = img[0], img[1]
         else:
             img2 = None
 
-        assert img.shape == img2.shape
-        assert img.dtype == img2.dtype and img.is_floating_point()
+        assert img2 is not None, "Pass (img, img2) to apply identical erasing to both."
+        assert img.shape == img2.shape, "img and img2 must have identical shapes"
+        assert img.dtype == img2.dtype and img.is_floating_point(), "imgs must be floating point tensors"
+
         B, F, R, C, H, W = img.shape
+        device = img.device
+        N = B * F * R
 
-        out1 = img.clone()
-        out2 = img2.clone()
+        # Flatten leading dims to (N, C, H, W)
+        x1 = img.reshape(N, C, H, W).clone()
+        x2 = img2.reshape(N, C, H, W).clone()
 
-        area = H * W
+        # Decide which samples get erased
+        apply_mask = (torch.rand(N, generator=self.generator, device=device) < self.p)
 
-        for b in range(B):
-            for f in range(F):
-                for r in range(R):
-                    if torch.rand(1, generator=self.generator) > self.p:
-                        continue
+        if apply_mask.any():
+            # Sample scale and ratio
+            s_low, s_high = self.scale
+            r_low, r_high = self.ratio
 
-                    # sample erasing rectangle
-                    log_ratio = torch.log(torch.tensor(self.ratio))
-                    for _ in range(10):  # try a few times to find a valid rectangle
-                        erase_area = area * torch.empty(1).uniform_(self.scale[0], self.scale[1], generator=self.generator).item()
-                        aspect_ratio = torch.exp(torch.empty(1).uniform_(log_ratio[0], log_ratio[1], generator=self.generator)).item()
-                        h = int(round(math.sqrt(erase_area * aspect_ratio)))
-                        w = int(round(math.sqrt(erase_area / aspect_ratio)))
-                        if not (h < H and w < W):
-                            continue
+            # target erase area fraction (per-sample)
+            scale_samples = torch.rand(N, generator=self.generator, device=device) * (s_high - s_low) + s_low
+            # aspect ratios log-uniform
+            log_r_low, log_r_high = math.log(r_low), math.log(r_high)
+            ratio_samples = torch.exp(
+                torch.rand(N, generator=self.generator, device=device) * (log_r_high - log_r_low) + log_r_low
+            )
 
-                        i = torch.randint(0, H - h + 1, size=(1,)).item()
-                        j = torch.randint(0, W - w + 1, size=(1,)).item()
+            total_area = float(H * W)
+            erase_area = scale_samples * total_area
+            # Derive h,w from area and ratio (h=sqrt(area*ratio), w=sqrt(area/ratio))
+            h = torch.sqrt(erase_area * ratio_samples)
+            w = torch.sqrt(erase_area / ratio_samples)
 
-                    # apply same to both
-                    out1[b, f, r, :, i:i+h, j:j+w] = self.value
-                    out2[b, f, r, :, i:i+h, j:j+w] = self.value
+            # Round and clamp to valid integer sizes (>=1 and <=H/W-1 for diversity)
+            # If H or W is 1, clamp upper bound to H/W respectively.
+            h = torch.clamp(h.round().to(torch.int64), 1, max(H - 1, 1))
+            w = torch.clamp(w.round().to(torch.int64), 1, max(W - 1, 1))
 
+            # Some samples might end up with h/w exceeding dims after rounding/clamp; adjust apply flag
+            valid_hw = (h <= H) & (w <= W)
+            apply_mask = apply_mask & valid_hw
+
+            if apply_mask.any():
+                # Sample top-left positions (vectorized) using uniform [0,1)
+                # i in [0, H-h], j in [0, W-w]
+                # Use float sampling scaled by per-sample bounds, then floor.
+                i_max = (H - h).clamp(min=0)
+                j_max = (W - w).clamp(min=0)
+
+                # Avoid torch.randint with per-sample bounds: scale rand() by (max+1)
+                i = (torch.rand(N, generator=self.generator, device=device) * (i_max + 1).to(torch.float32)).floor().to(torch.int64)
+                j = (torch.rand(N, generator=self.generator, device=device) * (j_max + 1).to(torch.float32)).floor().to(torch.int64)
+
+                # Build a rectangle mask for all samples at once: (N,1,H,W)
+                rows = torch.arange(H, device=device).view(1, 1, H, 1)
+                cols = torch.arange(W, device=device).view(1, 1, 1, W)
+
+                # reshape i,j,h,w for broadcasting (N,1,1,1)
+                i_b = i.view(N, 1, 1, 1)
+                j_b = j.view(N, 1, 1, 1)
+                h_b = h.view(N, 1, 1, 1)
+                w_b = w.view(N, 1, 1, 1)
+
+                in_rows = (rows >= i_b) & (rows < (i_b + h_b))
+                in_cols = (cols >= j_b) & (cols < (j_b + w_b))
+                rect = in_rows & in_cols  # (N,1,H,W)
+
+                # Only apply where apply_mask is True
+                rect = rect & apply_mask.view(N, 1, 1, 1)
+
+                # Apply erasing: set to constant value
+                # Use where() to avoid in-place boolean indexing scatter overhead
+                x1 = torch.where(rect, torch.as_tensor(self.value, device=device, dtype=x1.dtype), x1)
+                x2 = torch.where(rect, torch.as_tensor(self.value, device=device, dtype=x2.dtype), x2)
+
+        # Reshape back
+        out1 = x1.reshape(B, F, R, C, H, W)
+        out2 = x2.reshape(B, F, R, C, H, W)
         return out1, out2
     
     def __repr__(self) -> str:
