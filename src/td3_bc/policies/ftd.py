@@ -150,19 +150,19 @@ class ImageAttentionSelectorLayers(nn.Module):
         S, R, C = self.frame_stack, self.region_num, self.in_channels
         x = x.reshape(-1, C, H, W)
 
-        mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
+        mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1) #mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
         mask = torch.where(mask != 0, False, True)
 
         tokens = self.layers(x).reshape(B * S, R, -1)
         tokens_frame = tokens[:, -1:, :]
-        tokens_segment = tokens[:, :-1, :]
+        tokens_segment = tokens #tokens_segment = tokens[:, :-1, :]
         q = self.q(tokens_frame).reshape(B * S, 1, self.attention_heads, self.attention_embed_dim).transpose(-3, -2)
         k = (
             self.k(tokens_segment)
-            .reshape(B * S, R - 1, self.attention_heads, self.attention_embed_dim)
+            .reshape(B * S, R, self.attention_heads, self.attention_embed_dim) #.reshape(B * S, R - 1, self.attention_heads, self.attention_embed_dim)
             .transpose(-3, -2)
         )
-        v = x.reshape(B * S, R, C * H * W)[:, :-1, :]
+        v = x.reshape(B * S, R, C * H * W) #x.reshape(B * S, R, C * H * W)[:, :-1, :]
 
         attention = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(k.shape[-1], dtype=torch.float32))
         mask = torch.cat([torch.unsqueeze(mask, dim=1)] * self.attention_heads, dim=1)
