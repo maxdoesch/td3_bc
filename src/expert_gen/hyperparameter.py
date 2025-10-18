@@ -110,7 +110,7 @@ HYPERPARAMETERS = {
             batch_size=256,
             n_epochs=10,
             learning_rate=get_linear_fn(start=3e-4, end=3e-5, end_fraction=1.0),
-            gamma=0.99,
+            gamma=0.98,
             gae_lambda=0.95,
             clip_range=0.2,
             vf_coef=0.5,
