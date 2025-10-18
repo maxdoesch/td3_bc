@@ -153,27 +153,33 @@ class ImageAttentionSelectorLayers(nn.Module):
         mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
         mask = torch.where(mask != 0, False, True)
 
-        tokens = self.layers(x).reshape(B * S, R, -1)
-        tokens_frame = tokens[:, -1:, :]
-        tokens_segment = tokens[:, :-1, :]
-        q = self.q(tokens_frame).reshape(B * S, 1, self.attention_heads, self.attention_embed_dim).transpose(-3, -2)
-        k = (
-            self.k(tokens_segment)
-            .reshape(B * S, R - 1, self.attention_heads, self.attention_embed_dim)
-            .transpose(-3, -2)
-        )
-        v = x.reshape(B * S, R, C * H * W)[:, :-1, :]
+        if not mask.any():
+            tokens = self.layers(x).reshape(B * S, R, -1)
+            tokens_frame = tokens[:, -1:, :]
+            tokens_segment = tokens[:, :-1, :]
+            q = self.q(tokens_frame).reshape(B * S, 1, self.attention_heads, self.attention_embed_dim).transpose(-3, -2)
+            k = (
+                self.k(tokens_segment)
+                .reshape(B * S, R - 1, self.attention_heads, self.attention_embed_dim)
+                .transpose(-3, -2)
+            )
+            v = x.reshape(B * S, R, C * H * W)[:, :-1, :]
 
-        attention = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(k.shape[-1], dtype=torch.float32))
-        mask = torch.cat([torch.unsqueeze(mask, dim=1)] * self.attention_heads, dim=1)
-        attention = attention.masked_fill_(mask, float("-inf"))
+            attention = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(torch.tensor(k.shape[-1], dtype=torch.float32))
+            mask = torch.cat([torch.unsqueeze(mask, dim=1)] * self.attention_heads, dim=1)
+            attention = attention.masked_fill_(mask, float("-inf"))
 
-        multi_probs = torch.softmax(attention, dim=-1)
-        probs = torch.mean(multi_probs, dim=1)
-        ret_obs = torch.matmul(probs, v)
+            multi_probs = torch.softmax(attention, dim=-1)
+            probs = torch.mean(multi_probs, dim=1)
+            ret_obs = torch.matmul(probs, v)
 
-        # vector 2 image
-        ret_obs = ret_obs.reshape(-1, S * C, H, W)
+            # vector 2 image
+            ret_obs = ret_obs.reshape(-1, S * C, H, W)
+        else:
+            # If some regions are all zero, skip attention and return zeros
+            ret_obs = torch.zeros(B, S * C, H, W, device=x.device)
+            probs = None
+            multi_probs = None
 
         if return_logits:
             return probs
