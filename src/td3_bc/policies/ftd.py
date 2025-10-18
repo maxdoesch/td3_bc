@@ -153,7 +153,7 @@ class ImageAttentionSelectorLayers(nn.Module):
         mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
         mask = torch.where(mask != 0, False, True)
 
-        if not mask.any():
+        if not mask.all():
             tokens = self.layers(x).reshape(B * S, R, -1)
             tokens_frame = tokens[:, -1:, :]
             tokens_segment = tokens[:, :-1, :]
