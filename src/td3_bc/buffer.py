@@ -36,7 +36,7 @@ class ReplayBuffer:
 
         self.is_image_obs = len(self.obs_shape) >= 2
         self.max_size = (
-            min(int(2e5), max_size) if self.is_image_obs else max_size
+            min(int(3e5), max_size) if self.is_image_obs else max_size
         )  # hack to avoid MemoryError with large image buffers
 
         self.frame_stack = frame_stack
