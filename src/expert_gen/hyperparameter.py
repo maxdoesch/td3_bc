@@ -109,12 +109,12 @@ HYPERPARAMETERS = {
             n_steps=512,  # per env → 16*1024 =  rollout batch
             batch_size=256,
             n_epochs=10,
-            learning_rate=get_linear_fn(start=3e-4, end=3e-5, end_fraction=1.0),
-            gamma=0.99,
+            learning_rate=get_linear_fn(start=3e-4, end=1e-5, end_fraction=1.0),
+            gamma=0.98,
             gae_lambda=0.95,
             clip_range=0.2,
-            vf_coef=0.5,
-            ent_coef=0.0,  # optional: 1e-3 if exploration is too timid
+            vf_coef=0.7,
+            ent_coef=0.001,  # optional: 1e-3 if exploration is too timid
             max_grad_norm=0.5,
             use_sde=True,  # helps on small state tasks
             sde_sample_freq=4,
