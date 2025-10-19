@@ -131,6 +131,7 @@ class TD3BC_Base(BaseAgent):
         pi = self.actor(obs)
         #q1_value = self.critic.q1(obs, pi)
         #q1_value_norm = q1_value / (q1_value.abs().mean().detach() + 1e-9)
+        q1_value = np.array(0.0)
 
         bc_loss = functional.mse_loss(pi, action)
         actor_loss =  bc_loss #-q1_value_norm.mean() + self.alpha * bc_loss
