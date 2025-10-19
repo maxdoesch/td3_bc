@@ -14,7 +14,7 @@ from minari import DataCollector, list_local_datasets
 
 import dmc_env  # noqa: F401
 from dmc_env.segmentation import MobileSAMV2Config
-from dmc_env.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation
+from dmc_env.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation, ZoomObservationWrapper
 import td3_bc.utils as utils
 
 # Metadata
@@ -100,6 +100,8 @@ def generate_expert_dataset(
         obs_type="pixels",
         **env_kwargs,
     )
+
+    env = ZoomObservationWrapper(env, scale=0.7, keep_size=True, channels_first=gen_segmentation)
 
     if gen_segmentation:
         sam_config = MobileSAMV2Config(image_size=RAW_IMG_RESOLUTION, confidence_threshold=0.5)

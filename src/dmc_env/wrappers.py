@@ -116,6 +116,50 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         # all_segments = all_segments.reshape(self.num_regions_with_original * self.config.num_channels, self.H, self.W)
 
         return all_segments.byte().cpu().numpy()
+    
+class ZoomObservationWrapper(gym.ObservationWrapper):
+    """Zoom into the center of the observation by a given scale factor."""
+
+    def __init__(self, env, scale: float = 0.5, keep_size: bool = True, channels_first: bool = False):
+        super().__init__(env)
+        self.scale = scale
+        self.keep_size = keep_size
+        self.channels_first = channels_first
+        if channels_first:
+            C, H, W = env.observation_space.shape
+        else:
+            H, W, C = env.observation_space.shape
+
+        new_H, new_W = int(H * scale), int(W * scale)
+        if keep_size:
+            if channels_first:
+                self.observation_space = gym.spaces.Box(low=0, high=255, shape=(C, H, W), dtype=np.uint8)
+            else:
+                self.observation_space = gym.spaces.Box(low=0, high=255, shape=(H, W, C), dtype=np.uint8)
+        else:
+            if channels_first:
+                self.observation_space = gym.spaces.Box(low=0, high=255, shape=(C, new_H, new_W), dtype=np.uint8)
+            else:
+                self.observation_space = gym.spaces.Box(low=0, high=255, shape=(new_H, new_W, C), dtype=np.uint8)
+
+    def observation(self, observation):
+        if self.channels_first:
+            C, H, W = observation.shape
+        else:   
+            H, W, C = observation.shape
+        new_H, new_W = int(H * self.scale), int(W * self.scale)
+        start_H = (H - new_H) // 2
+        start_W = (W - new_W) // 2
+
+        if self.channels_first:
+            zoomed_observation = observation[:, start_H:start_H + new_H, start_W:start_W + new_W]
+        else:
+            zoomed_observation = observation[start_H:start_H + new_H, start_W:start_W + new_W, :]
+
+        if self.keep_size:
+            zoomed_observation = resize_stacked_images(zoomed_observation[np.newaxis, :], (H, W), is_channels_first=self.channels_first)[0]
+
+        return zoomed_observation
 
 
 class ResizeObservation(gym.ObservationWrapper):

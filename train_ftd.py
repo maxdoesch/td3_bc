@@ -10,7 +10,7 @@ from td3_bc.evaluator import RewardAndLengthMetric
 
 import dmc_env  # noqa: F401
 from dmc_env.segmentation import MobileSAMV2Config
-from dmc_env.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation, FrameStack
+from dmc_env.wrappers import FTDObservationWrapper, FTDObservationWrapperConfig, ResizeObservation, FrameStack, ZoomObservationWrapper
 
 class ObservationMetric(RewardAndLengthMetric):
     def __init__(self, fps: int = 30):
@@ -62,6 +62,7 @@ def make_vec(env_id: str, frame_stack: int, **env_kwargs):
         action_repeat=action_repeat,
         **env_kwargs,
     )
+    env = ZoomObservationWrapper(env, scale=0.7, keep_size=True, channels_first=True)
     env_config = FTDObservationWrapperConfig(
         sam_config=MobileSAMV2Config(image_size=256, confidence_threshold=0.5),
         add_original_frame=True,
