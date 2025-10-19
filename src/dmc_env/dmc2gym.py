@@ -308,7 +308,7 @@ class DistractionDMCWrapper(DMCWrapperBackground):
         self._data = self._load_video(self._video_paths[self._video_index])
         self._data = interpolate_bg(self._data, (self._height, self._width))
 
-        self._current_frame = 0
+        self._current_frame = np.random.randint(0, self._data.shape[0])
 
         return super().reset(seed=seed, options=options)
 
