@@ -262,23 +262,23 @@ class TD3BC_FTD(TD3BC_Base):
             metrics["train/predictors_update_freq"] = self.predictors_update_freq
 
         # Update critic
-        critic_loss, avg_q1, avg_q2 = self.update_critic(**batch)
+        #critic_loss, avg_q1, avg_q2 = self.update_critic(**batch)
 
-        metrics["train/critic_loss"] = critic_loss
-        metrics["train/avg_q1"] = avg_q1
-        metrics["train/avg_q2"] = avg_q2
+        #metrics["train/critic_loss"] = critic_loss
+        #metrics["train/avg_q1"] = avg_q1
+        #metrics["train/avg_q2"] = avg_q2
 
         # Update actor
-        if self.total_it % self.policy_freq == 0:
-            actions_taken, actor_loss, bc_loss, _ = self.update_actor(batch["obs"], batch["action"])
+        #if self.total_it % self.policy_freq == 0:
+        actions_taken, actor_loss, bc_loss, _ = self.update_actor(batch["obs"], batch["action"])
 
-            metrics["train/actor_loss"] = actor_loss
-            metrics["train/bc_loss"] = bc_loss
-            metrics["train/actions_taken"] = actions_taken
+        metrics["train/actor_loss"] = actor_loss
+        metrics["train/bc_loss"] = bc_loss
+        metrics["train/actions_taken"] = actions_taken
 
-            # Update the frozen target models
-            self.update_critic_target()
-            self.update_actor_target()
+        # Update the frozen target models
+        #self.update_critic_target()
+        self.update_actor_target()
 
         # Update auxiliary predictors
         if (
