@@ -17,7 +17,7 @@ from tqdm import tqdm
 import wandb
 
 from dmc_env.wrappers import FrameStack
-from td3_bc.buffer import ReplayBuffer
+from td3_bc.buffer import ReplayBufferState, ReplayBufferImage, ReplayBuffer
 import td3_bc.algorithms.td3_bc_vanilla as td3_bc
 import td3_bc.algorithms.td3_bc_ftd as td3_bc_ftd
 from td3_bc.evaluator import Evaluator, Metric, RewardAndLengthMetric
@@ -401,13 +401,13 @@ class OfflineTrainer(Trainer):
                 raise NotImplementedError("load from file")
             else:
                 dataset = minari.load_dataset(self.cfg.dataset_path, download=True)
-                self.buffer.convert_minari(dataset)
+                self.buffer.load_minari(dataset)
                 logging.info(f"Replay buffer filled with transitions from Minari dataset at {self.cfg.dataset_path}.")
         else:
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
+        self.buffer = ReplayBufferImage(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
 
         self._fill_replay_buffer()
 
@@ -464,7 +464,7 @@ class OnlineTrainer(Trainer):
         self.episode_starts = np.zeros(n_envs, dtype=np.bool)
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
+        self.buffer = ReplayBufferImage(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
 
         if self.cfg.pretrain_dir.endswith("/"):
             self.cfg.pretrain_dir = self.cfg.pretrain_dir[:-1]
