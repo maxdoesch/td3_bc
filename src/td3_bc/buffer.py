@@ -258,7 +258,7 @@ class ReplayBufferState(ReplayBuffer):
                 "action": episode.actions,
                 "next_obs": episode.observations[1:],
                 "reward": episode.rewards,
-                "done": episode.terminations,
+                "done": episode.terminations | episode.truncations,
             }
             self.add(**transition)
 
@@ -322,18 +322,34 @@ class ImageDataset(IterableDataset):
         not_dones = []
 
         for ep in episodes:
-            observations = utils.uncombine_stacked_frames(ep.observations)
-            observations, next_observations = self._get_stacked_observations(observations)
-            actions_ep = np.asarray(ep.actions)
-            rewards_ep = np.asarray(ep.rewards)
-            not_dones_ep = 1 - np.asarray(ep.terminations)
+            observations = utils.uncombine_stacked_frames(ep.observations) #N, R, C, H, W
+            observations, next_observations = self._get_stacked_observations(observations) #N-1, F, R, C, H, W
+            actions_ep = np.asarray(ep.actions) #N-1, A
+            rewards_ep = np.asarray(ep.rewards) #N-1,
+            not_dones_ep = 1 - np.asarray(ep.terminations | ep.truncations) #N-1,
+
+            # observations:      (N-1, F, R, C, H, W)
+            # next_observations: (N-1, F, R, C, H, W)
+
+            if self.frame_stack > 1:
+                valid_obs_per_frame  = (observations != 0).any(axis=(2, 3, 4, 5))         # (N-1, F)
+                valid_next_per_frame = (next_observations != 0).any(axis=(2, 3, 4, 5))    # (N-1, F)
+
+                mask_obs  = valid_obs_per_frame.all(axis=1)                                # (N-1,)
+                mask_next = valid_next_per_frame.all(axis=1)                               # (N-1,)
+
+                mask = mask_obs & mask_next                                                # (N-1,)
+            else:
+                mask_obs  = (observations != 0).any(axis=(1, 2, 3, 4))                     # (N-1,)
+                mask_next = (next_observations != 0).any(axis=(1, 2, 3, 4))                # (N-1,)
+                mask = mask_obs & mask_next
             
-            obs.append(observations)
-            next_obs.append(next_observations)
-            actions.append(actions_ep)
-            rewards.append(rewards_ep)
-            not_dones.append(not_dones_ep)
-        
+            obs.append(observations[mask])
+            next_obs.append(next_observations[mask])
+            actions.append(actions_ep[mask])
+            rewards.append(rewards_ep[mask])
+            not_dones.append(not_dones_ep[mask])
+
         obs = np.concatenate(obs, axis=0)
         next_obs = np.concatenate(next_obs, axis=0)
         actions = np.concatenate(actions, axis=0)
