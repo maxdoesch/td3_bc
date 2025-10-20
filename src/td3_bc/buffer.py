@@ -258,7 +258,7 @@ class ReplayBufferState(ReplayBuffer):
                 "action": episode.actions,
                 "next_obs": episode.observations[1:],
                 "reward": episode.rewards,
-                "done": episode.terminations,
+                "done": episode.terminations | episode.truncations,
             }
             self.add(**transition)
 
@@ -322,18 +322,34 @@ class ImageDataset(IterableDataset):
         not_dones = []
 
         for ep in episodes:
-            observations = utils.uncombine_stacked_frames(ep.observations)
-            observations, next_observations = self._get_stacked_observations(observations)
-            actions_ep = np.asarray(ep.actions)
-            rewards_ep = np.asarray(ep.rewards)
-            not_dones_ep = 1 - np.asarray(ep.terminations)
+            observations = utils.uncombine_stacked_frames(ep.observations) #N, R, C, H, W
+            observations, next_observations = self._get_stacked_observations(observations) #N-1, F, R, C, H, W
+            actions_ep = np.asarray(ep.actions) #N-1, A
+            rewards_ep = np.asarray(ep.rewards) #N-1,
+            not_dones_ep = 1 - np.asarray(ep.terminations | ep.truncations) #N-1,
+
+            # observations:      (N-1, F, R, C, H, W)
+            # next_observations: (N-1, F, R, C, H, W)
+
+            if self.frame_stack > 1:
+                valid_obs_per_frame  = (observations != 0).any(axis=(2, 3, 4, 5))         # (N-1, F)
+                valid_next_per_frame = (next_observations != 0).any(axis=(2, 3, 4, 5))    # (N-1, F)
+
+                mask_obs  = valid_obs_per_frame.all(axis=1)                                # (N-1,)
+                mask_next = valid_next_per_frame.all(axis=1)                               # (N-1,)
+
+                mask = mask_obs & mask_next                                                # (N-1,)
+            else:
+                mask_obs  = (observations != 0).any(axis=(1, 2, 3, 4))                     # (N-1,)
+                mask_next = (next_observations != 0).any(axis=(1, 2, 3, 4))                # (N-1,)
+                mask = mask_obs & mask_next
             
-            obs.append(observations)
-            next_obs.append(next_observations)
-            actions.append(actions_ep)
-            rewards.append(rewards_ep)
-            not_dones.append(not_dones_ep)
-        
+            obs.append(observations[mask])
+            next_obs.append(next_observations[mask])
+            actions.append(actions_ep[mask])
+            rewards.append(rewards_ep[mask])
+            not_dones.append(not_dones_ep[mask])
+
         obs = np.concatenate(obs, axis=0)
         next_obs = np.concatenate(next_obs, axis=0)
         actions = np.concatenate(actions, axis=0)
@@ -398,7 +414,7 @@ class ReplayBufferImage(ReplayBuffer):
         obs_shape: Union[int, Tuple[int, ...]],
         action_dim: int,
         frame_stack: int = 1,
-        n_workers: int = 4,
+        n_workers: int = 0,
         device: Optional[str] = None
     ):
         super().__init__(obs_shape=obs_shape, action_dim=action_dim, device=device)
@@ -417,6 +433,7 @@ class ReplayBufferImage(ReplayBuffer):
             [
                 utils.RandomCropDual(self.obs_shape[-2:], padding=4, padding_mode="constant"),
                 utils.RandomPartialRPermutation() if len(self.obs_shape) > 4 else T.Lambda(lambda x: x),
+                utils.DropoutRegionsDual(p=0.1)
                 #utils.ColorJitterDual(brightness=0.4, contrast=0.4, saturation=0.4) if len(self.obs_shape) > 4 else T.Lambda(lambda x: x),
                 #utils.RandomErasingDual(p=0.5, scale=(0.02, 0.25), ratio=(0.3, 3.3), value=0) if len(self.obs_shape) > 4 else T.Lambda(lambda x: x)
             ]
@@ -434,7 +451,7 @@ class ReplayBufferImage(ReplayBuffer):
 
     def sample(self, batch_size: int) -> Dict[str, torch.Tensor]:
         if self.data_loader is None:
-            self.data_loader = DataLoader(self.dataset, batch_size=batch_size, num_workers=self.n_workers, pin_memory=True, persistent_workers=True)
+            self.data_loader = DataLoader(self.dataset, batch_size=batch_size, num_workers=self.n_workers, pin_memory=True, persistent_workers=True if self.n_workers > 0 else False)
             self.iter_data_loader = iter(self.data_loader)
 
         batch = next(self.iter_data_loader)

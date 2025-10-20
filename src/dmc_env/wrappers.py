@@ -99,6 +99,14 @@ class FTDObservationWrapper(gym.ObservationWrapper):
         # Get Masks
         pred = self.__get_predictions(observation)
         if pred is None:
+            if self.config.add_original_frame:
+                return np.concatenate(
+                    [
+                        np.zeros((self.config.num_regions, self.config.num_channels, self.H, self.W), dtype=np.uint8),
+                        observation[np.newaxis, :, :, :],
+                    ],
+                    axis=0,
+                )
             return np.zeros((self.num_regions_with_original, self.config.num_channels, self.H, self.W), dtype=np.uint8)
         sorted_indices = self.__sort_predictions(pred)
         masks = pred["masks"][sorted_indices]

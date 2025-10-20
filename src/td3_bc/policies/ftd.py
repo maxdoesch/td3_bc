@@ -15,6 +15,7 @@ class ImageAttentionSelectorConfig:
     attention_embed_dim: int = 128  # Embedding dimension for attention
     attention_heads: int = 4  # Number of attention heads
 
+    use_gated_attention: bool = False  # Whether to use gated attention
 
 @dataclass
 class FeatureExtractorConfig:
@@ -117,6 +118,7 @@ class ImageAttentionSelectorLayers(nn.Module):
         self.conv_filters = cfg.conv_filters
         self.attention_embed_dim = cfg.attention_embed_dim
         self.attention_heads = cfg.attention_heads
+        self.use_gated_attention = cfg.use_gated_attention
 
         reduced_img_height = input_shape[1] // 2
         self.layers = [
@@ -143,12 +145,17 @@ class ImageAttentionSelectorLayers(nn.Module):
         self.k = nn.Linear(self.attention_embed_dim, self.attention_heads * self.attention_embed_dim)
         # no 'v' network, we use the raw input images as the values
 
+        self.alpha_mlp = torch.nn.Sequential(
+            torch.nn.Linear(2, 1),  # [attn_max, attn_entropy]
+            torch.nn.Sigmoid()
+        ) if self.use_gated_attention else None
+
     def forward(self, x, return_logits=False, return_head_logits=False, return_all=False):
         # (batch_size, frame_stack * region_num * channels , height, width)
         # Last region is the whole frame
         B, _, H, W = x.shape
         S, R, C = self.frame_stack, self.region_num, self.in_channels
-        x = x.reshape(-1, C, H, W)
+        x = x.reshape(-1, C, H, W) # (B*S*R, C, H, W)
 
         mask = torch.sum(x, dim=(1, 2, 3)).reshape(B * S, 1, -1)[:, :, :-1]
         mask = torch.where(mask != 0, False, True)
@@ -168,12 +175,24 @@ class ImageAttentionSelectorLayers(nn.Module):
         mask = torch.cat([torch.unsqueeze(mask, dim=1)] * self.attention_heads, dim=1)
         attention = attention.masked_fill_(mask, float("-inf")) #B*S, heads, 1, R-1
 
-        multi_probs = torch.softmax(attention, dim=-1)
-        probs = torch.mean(multi_probs, dim=1)
-        ret_obs = torch.matmul(probs, v)
+        multi_probs = torch.softmax(attention, dim=-1) # (B*S, heads, 1, R-1)
+        probs = torch.mean(multi_probs, dim=1) # (B*S, 1, R-1)
 
-        invalid = torch.isinf(attention[:, 0]).all(dim=-1, keepdim=True)
-        ret_obs = torch.where(invalid, torch.zeros_like(ret_obs), ret_obs)
+        invalid = torch.isinf(attention[:, 0]).all(dim=-1) # (B*S, 1)
+        probs = torch.where(invalid.unsqueeze(-1), torch.zeros_like(probs), probs)
+
+        ret_obs = torch.matmul(probs, v).squeeze() # (B*S, C*H*W)
+
+        if self.use_gated_attention:
+            eps = 1e-5
+            probs = probs.squeeze()  # (B*S, R-1)
+            attn_max = probs.max(dim=-1).values.unsqueeze(-1)   # (B*S, 1)
+            attn_entropy = -(probs * (probs + eps).log()).sum(dim=-1, keepdim=True)  # (B*S, 1)
+
+            alpha_in = torch.cat([attn_max, attn_entropy], dim=-1)
+            alpha = self.alpha_mlp(alpha_in)
+
+            ret_obs = alpha * ret_obs + (1 - alpha) * x.reshape(B * S, R, C*H*W)[:, -1]
 
         # vector 2 image
         ret_obs = ret_obs.reshape(-1, S * C, H, W)
