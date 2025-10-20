@@ -356,3 +356,33 @@ class RandomErasingDual:
             f"{self.__class__.__name__}("
             f"p={self.p}, scale={self.scale}, ratio={self.ratio}, value={self.value}, generator={self.generator})"
         )
+    
+class DropoutRegionsDual:
+    def __init__(self, p: float = 0.5, generator: Optional[torch.Generator] = None):
+        self.p = p
+        self.value = 0.0
+        self.generator = generator
+
+    @torch.no_grad()
+    def __call__(self, img):
+        # Expect a tuple/list (img, img2) and apply exactly the same rectangles to both
+        if isinstance(img, (tuple, list)):
+            img, img2 = img[0], img[1]
+        else:
+            img2 = None
+
+        B, F, R, C, H, W = img.shape
+
+        # True == drop this region
+        drop = torch.rand((B, F, R), generator=self.generator, device=img.device) < self.p
+        drop[:, :, -1] = False  # never drop the last region
+        drop = drop.view(B, F, R, 1, 1, 1)  # broadcast over C,H,W
+
+        out1 = img.masked_fill(drop, self.value)
+        if img2 is not None:
+            out2 = img2.masked_fill(drop, self.value)
+            return out1, out2
+        return out1
+    
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(p={self.p}, generator={self.generator})"
