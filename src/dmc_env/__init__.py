@@ -23,7 +23,7 @@ def make(
     environment_kwargs: Optional[Dict] = None,
     time_limit: Optional[float] = None,
     channels_first: bool = True,
-    env_type: str = "dmc",  # 'dmc', 'dmc_background', 'dmc_distraction'
+    env_type: str = "dmc",  # 'dmc', 'dmc_background', 'dmc_distraction', 'dmc_color'
 ):
     assert obs_type in ["state", "pixels", "both"], "obs_type must be one of: state, pixels, both"
 
@@ -32,6 +32,7 @@ def make(
     env_type_entry_point_map = {
         "dmc": "dmc_env.dmc2gym:DMCWrapper",
         "dmc_background": "dmc_env.dmc2gym:DMCWrapperBackground",
+        "dmc_color": "dmc_env.dmc2gym:ColorDMCWrapper",
         "dmc_distraction": "dmc_env.dmc2gym:DistractionDMCWrapper",
     }
 
@@ -68,7 +69,7 @@ def make(
 
 
 for domain_name, task_name in suite._get_tasks(tag=None):
-    for env_type in ["dmc", "dmc_background", "dmc_distraction"]:
+    for env_type in ["dmc", "dmc_background", "dmc_distraction", "dmc_color"]:
         make(
             domain_name=domain_name,
             task_name=task_name,

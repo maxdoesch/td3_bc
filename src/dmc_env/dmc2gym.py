@@ -1,3 +1,4 @@
+import colorsys
 import os
 import numpy as np
 from typing import Dict, Optional, Tuple
@@ -321,3 +322,51 @@ class DistractionDMCWrapper(DMCWrapperBackground):
         obs = super().render(mode=mode, height=height, width=width, camera_id=camera_id)
 
         return replace_green_bg(obs, self._data[self._current_frame])
+
+class ColorDMCWrapper(DMCWrapperBackground):
+    """
+    A wrapper for dm_control environments that implements color distraction by randomly changing the hue of the background.
+    """
+
+    def __init__(
+        self,
+        domain_name: str,
+        task_name: str,
+        task_kwargs: Optional[Dict] = None,
+        visualize_reward: bool = False,
+        obs_type: str = "pixels",
+        height: int = 84,
+        width: int = 84,
+        camera_id: int = 0,
+        action_repeat: int = 1,
+        environment_kwargs: Optional[Dict] = None,
+        channels_first: bool = True,
+    ):
+        super().__init__(
+            domain_name=domain_name,
+            task_name=task_name,
+            task_kwargs=task_kwargs,
+            visualize_reward=visualize_reward,
+            obs_type=obs_type,
+            height=height,
+            width=width,
+            camera_id=camera_id,
+            action_repeat=action_repeat,
+            environment_kwargs=environment_kwargs,
+            channels_first=channels_first,
+            background_color="green",  # green background for distraction
+        )
+
+
+    def random_color(self, min_s=0.4, max_s=0.8, min_v=0.4, max_v=0.8):
+        """Generate a pleasant random RGB color."""
+        h = np.random.rand()                   # random hue [0, 1)
+        s = np.random.uniform(min_s, max_s)    # moderate saturation
+        v = np.random.uniform(min_v, max_v)    # moderate brightness
+        r, g, b = colorsys.hsv_to_rgb(h, s, v)
+        return (np.array([r, g, b]) * 255).astype(np.uint8)
+    
+    def render(self, mode="rgb_array", height=None, width=None, camera_id=0):
+        obs = super().render(mode=mode, height=height, width=width, camera_id=camera_id)
+        bg_color = np.ones_like(obs, dtype=np.uint8) * self.random_color()[None, None, :]
+        return replace_green_bg(obs, bg_color)
