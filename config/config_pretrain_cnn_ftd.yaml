@@ -1,6 +1,6 @@
 train_steps: 1000000
-eval_freq: 20000
-eval_episodes: 5
+eval_freq: 25000
+eval_episodes: 0
 checkpoint_freq: 25000
 batch_size: 64
 
