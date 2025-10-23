@@ -322,26 +322,26 @@ class ImageDataset(IterableDataset):
         not_dones = []
 
         for ep in episodes:
-            observations = utils.uncombine_stacked_frames(ep.observations) #N, R, C, H, W
-            observations, next_observations = self._get_stacked_observations(observations) #N-1, F, R, C, H, W
+            observations = utils.uncombine_stacked_frames(ep.observations) #N, R, C, H, W or N, C, H, W
+            observations, next_observations = self._get_stacked_observations(observations) #N-1, F, R, C, H, W or N-1, C, H, W
             actions_ep = np.asarray(ep.actions) #N-1, A
             rewards_ep = np.asarray(ep.rewards) #N-1,
             not_dones_ep = 1 - np.asarray(ep.terminations | ep.truncations) #N-1,
 
-            # observations:      (N-1, F, R, C, H, W)
-            # next_observations: (N-1, F, R, C, H, W)
+            # observations:      (N-1, F, R, C, H, W) or (N-1, C, H, W)
+            # next_observations: (N-1, F, R, C, H, W) or (N-1, C, H, W)
 
             if self.frame_stack > 1:
-                valid_obs_per_frame  = (observations != 0).any(axis=(2, 3, 4, 5))         # (N-1, F)
-                valid_next_per_frame = (next_observations != 0).any(axis=(2, 3, 4, 5))    # (N-1, F)
+                valid_obs_per_frame  = (observations != 0).any(axis=tuple(range(2, observations.ndim)))         # (N-1, F)
+                valid_next_per_frame = (next_observations != 0).any(axis=tuple(range(2, next_observations.ndim)))    # (N-1, F)
 
                 mask_obs  = valid_obs_per_frame.all(axis=1)                                # (N-1,)
                 mask_next = valid_next_per_frame.all(axis=1)                               # (N-1,)
 
                 mask = mask_obs & mask_next                                                # (N-1,)
             else:
-                mask_obs  = (observations != 0).any(axis=(1, 2, 3, 4))                     # (N-1,)
-                mask_next = (next_observations != 0).any(axis=(1, 2, 3, 4))                # (N-1,)
+                mask_obs  = (observations != 0).any(axis=tuple(range(2, observations.ndim)))                     # (N-1,)
+                mask_next = (next_observations != 0).any(axis=tuple(range(2, next_observations.ndim)))                # (N-1,)
                 mask = mask_obs & mask_next
             
             obs.append(observations[mask])
@@ -433,7 +433,7 @@ class ReplayBufferImage(ReplayBuffer):
             [
                 utils.RandomCropDual(self.obs_shape[-2:], padding=4, padding_mode="constant"),
                 utils.RandomPartialRPermutation() if len(self.obs_shape) > 4 else T.Lambda(lambda x: x),
-                utils.DropoutRegionsDual(p=0.1)
+                utils.DropoutRegionsDual(p=0.1) if len(self.obs_shape) > 4 else T.Lambda(lambda x: x),
                 #utils.ColorJitterDual(brightness=0.4, contrast=0.4, saturation=0.4) if len(self.obs_shape) > 4 else T.Lambda(lambda x: x),
                 #utils.RandomErasingDual(p=0.5, scale=(0.02, 0.25), ratio=(0.3, 3.3), value=0) if len(self.obs_shape) > 4 else T.Lambda(lambda x: x)
             ]
