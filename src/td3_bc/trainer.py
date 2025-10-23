@@ -190,7 +190,7 @@ class Trainer(ABC):
                     self.cfg.env_name,
                     num_envs=self.cfg.num_envs,
                     vectorization_mode="sync",
-                    wrappers=[lambda env: FrameStack(env, k=self.cfg.frame_stack), lambda env: ZoomObservationWrapper(env, scale=0.7, keep_size=True, channels_first=True)],
+                    wrappers=[lambda env: ZoomObservationWrapper(env, scale=0.7, keep_size=True, channels_first=True), lambda env: FrameStack(env, k=self.cfg.frame_stack)],
                     **self.cfg.env_kwargs,
                 )
             else:
