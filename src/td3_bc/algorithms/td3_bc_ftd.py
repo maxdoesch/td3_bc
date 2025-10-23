@@ -143,6 +143,10 @@ class TD3BC_FTD(TD3BC_Base):
             obs_shape, action_dim, max_action, self.device, cfg.policy_config, **policy_kwargs
         )
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
+        for m in (self.actor_target, self.critic_target):
+            for p in m.parameters():
+                p.requires_grad = False
+            m.eval()
 
         # === Auxiliary Predictors ===
 
@@ -156,7 +160,6 @@ class TD3BC_FTD(TD3BC_Base):
 
         # === Optimizers ===
 
-        self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
         self.actor_optimizer = torch.optim.Adam(
             list(self.actor.actor_loss_parameters) + list(self.critic.actor_loss_parameters), lr=cfg.actor_lr
         )
