@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 import wandb
 
-from dmc_env.wrappers import FrameStack
+from dmc_env.wrappers import FrameStack, ZoomObservationWrapper
 from td3_bc.buffer import ReplayBufferState, ReplayBufferImage, ReplayBuffer
 import td3_bc.algorithms.td3_bc_vanilla as td3_bc
 import td3_bc.algorithms.td3_bc_ftd as td3_bc_ftd
@@ -190,7 +190,7 @@ class Trainer(ABC):
                     self.cfg.env_name,
                     num_envs=self.cfg.num_envs,
                     vectorization_mode="sync",
-                    wrappers=[lambda env: FrameStack(env, k=self.cfg.frame_stack)],
+                    wrappers=[lambda env: FrameStack(env, k=self.cfg.frame_stack), lambda env: ZoomObservationWrapper(env, scale=0.7, keep_size=True, channels_first=True)],
                     **self.cfg.env_kwargs,
                 )
             else:
