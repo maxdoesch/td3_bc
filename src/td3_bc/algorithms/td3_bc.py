@@ -68,6 +68,11 @@ class TD3BC_Base(BaseAgent):
             cfg=cfg.policy_config,
         )
         self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
+        for m in (self.actor_target, self.critic_target):
+            for p in m.parameters():
+                p.requires_grad = False
+            m.eval()
+
         self.actor_optimizer = torch.optim.Adam(
             list(self.actor.actor_loss_parameters) + list(self.critic.actor_loss_parameters), lr=cfg.actor_lr
         )
@@ -142,13 +147,15 @@ class TD3BC_Base(BaseAgent):
 
         return pi.detach().cpu().numpy(), actor_loss.item(), bc_loss.item(), q1_value.mean().item()
 
+    @torch.no_grad()
     def update_actor_target(self):
-        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        for p, tp in zip(self.actor.parameters(), self.actor_target.parameters()):
+            tp.mul_(1 - self.tau).add_(self.tau * p)
 
+    @torch.no_grad()
     def update_critic_target(self):
-        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        for p, tp in zip(self.critic.parameters(), self.critic_target.parameters()):
+            tp.mul_(1 - self.tau).add_(self.tau * p)
 
     def save(self, dir_path: str):
         file_path = os.path.join(dir_path, "td3_bc.pt")
