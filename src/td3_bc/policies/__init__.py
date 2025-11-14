@@ -1,0 +1,96 @@
+from typing import Callable, Tuple, Union
+
+from .policy import PolicyConfig, BaseActor, BaseCritic
+from .mlp import MlpPolicyConfig, MlpActor, MlpCritic
+from .cnn import CnnPolicyConfig, CnnEncoder, CnnActor, CnnCritic
+from .ftd import FtdPolicyConfig, SharedFTDLayers, FTDActor, FTDCritic
+from .cnn_ftd import CnnFtdEncoder, CnnFtdPolicyConfig
+
+POLICY_REGISTRY = {}
+
+
+def register_policy(name: str) -> Callable:
+    def decorator(fn: Callable) -> Callable:
+        if name in POLICY_REGISTRY:
+            raise ValueError(f"Policy {name} already registered")
+        POLICY_REGISTRY[name] = fn
+        return fn
+
+    return decorator
+
+
+@register_policy("mlp")
+def build_mlp_policy(
+    obs_shape: Union[int, Tuple[int, ...]],
+    action_dim: int,
+    max_action: float,
+    device: str,
+    cfg: MlpPolicyConfig,
+    **policy_kwargs,
+) -> Tuple[BaseActor, BaseCritic]:
+    actor = MlpActor(
+        obs_shape,
+        action_dim,
+        hidden_dim=cfg.actor_hidden_dim,
+        n_layers=cfg.actor_n_layers,
+        max_action=max_action,
+    ).to(device)
+    critic = MlpCritic(
+        obs_shape,
+        action_dim,
+        hidden_dim=cfg.critic_hidden_dim,
+        n_layers=cfg.critic_n_layers,
+    ).to(device)
+    return actor, critic
+
+
+@register_policy("cnn")
+def build_cnn_policy(
+    obs_shape: Tuple[int, ...], action_dim: int, max_action: float, device: str, cfg: CnnPolicyConfig, **policy_kwargs
+) -> Tuple[BaseActor, BaseCritic]:
+    shared_encoder = CnnEncoder(obs_shape, cfg.cnn_encoder_cfg).to(device)
+    actor = CnnActor(shared_encoder, obs_shape, action_dim, max_action, cfg.actor_cfg).to(device)
+    critic = CnnCritic(shared_encoder, obs_shape, action_dim, cfg.critic_cfg).to(device)
+    return actor, critic
+
+
+@register_policy("ftd")
+def build_ftd_policy(
+    obs_shape: Tuple[int, ...], action_dim: int, max_action: float, device: str, cfg: FtdPolicyConfig, **policy_kwargs
+) -> Tuple[BaseActor, BaseCritic]:
+    frame_stack = policy_kwargs.get("frame_stack", 1)
+    shared_layers = SharedFTDLayers(obs_shape, frame_stack, cfg.shared_layers_cfg).to(device)
+    actor = FTDActor(shared_layers, obs_shape, action_dim, max_action, cfg.actor_cfg).to(device)
+    critic = FTDCritic(shared_layers, obs_shape, action_dim, cfg.critic_cfg).to(device)
+    return actor, critic
+
+
+@register_policy("cnn_ftd")
+def build_cnn_ftd_policy(
+    obs_shape: Tuple[int, ...],
+    action_dim: int,
+    max_action: float,
+    device: str,
+    cfg: CnnFtdPolicyConfig,
+    **policy_kwargs,
+) -> Tuple[BaseActor, BaseCritic]:
+    frame_stack = policy_kwargs.get("frame_stack", 1)
+    shared_encoder = CnnFtdEncoder(obs_shape, frame_stack, cfg.cnn_encoder_cfg).to(device)
+    actor = CnnActor(shared_encoder, obs_shape, action_dim, max_action, cfg.actor_cfg).to(device)
+    critic = CnnCritic(shared_encoder, obs_shape, action_dim, cfg.critic_cfg).to(device)
+    return actor, critic
+
+
+def get_policy(
+    obs_shape: Union[int, Tuple[int, ...]],
+    action_dim: int,
+    max_action: float,
+    device: str,
+    cfg: PolicyConfig,
+    **policy_kwargs,
+) -> Tuple[BaseActor, BaseCritic]:
+    name = PolicyConfig.get_choice_name(type(cfg))
+    if name not in POLICY_REGISTRY:
+        raise ValueError(f"Unknown Policy Configuration type: {type(cfg)}")
+    builder = POLICY_REGISTRY[name]
+    return builder(obs_shape, action_dim, max_action, device, cfg, **policy_kwargs)

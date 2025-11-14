@@ -1,0 +1,67 @@
+train_steps: 100000
+eval_freq: 10000
+eval_episodes: 2
+checkpoint_freq: 10000
+batch_size: 32
+
+seeds: 42
+n_seeds: 5
+
+wandb_project: td3-bc
+checkpoint_dir: ./checkpoints
+
+#experiment_name: <optional>
+
+dataset_path: dmc_distraction/dmc_distraction_cheetah_run_1-v1/expert-v0
+
+env_name: dmc_distraction_cheetah_run_1-v1
+num_envs: 1
+
+train_mode:
+  type: pretrain_ftd
+
+  td3_config:
+    discount: 0.99
+    tau: 0.005
+    policy_noise: 0.2
+    noise_clip: 0.5
+    alpha: 0.4
+    actor_lr: 3e-4
+    critic_lr: 3e-4
+    policy_freq: 2
+
+    policy_config:
+      type: ftd
+
+      shared_layers_cfg: 
+        attn_selector_cfg:
+          conv_layers: 5
+          conv_filters: 32
+          attention_embed_dim: 128
+          attention_heads: 4
+
+        feature_extractor_cfg:
+          conv_layers: 11
+          conv_filters: 32
+
+      actor_cfg:
+        rl_projection_dim: 100
+        hidden_dim: 256
+        n_layers: 2
+
+      critic_cfg:
+        rl_projection_dim: 100
+        hidden_dim: 256
+        n_layers: 2
+
+    predictor_hidden_dim: 1024
+    reward_factor: 1.0
+    inverse_factor: 1.0
+    max_grad_norm: 5.0
+    predictors_lr: 1e-4
+
+    predictors_update_freq: 0 # currently turned off
+    predictors_update_slow_freq: 50_000
+    predictors_warmup_steps: 10_000
+
+    log_img_freq: 500

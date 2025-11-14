@@ -7,7 +7,7 @@ import gymnasium as gym
 from gymnasium.vector import VectorEnv
 from abc import ABC, abstractmethod
 
-import td3_bc.td3_bc as td3_bc
+import td3_bc.algorithms.td3_bc as td3_bc
 
 
 def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float = 1e-3) -> np.ndarray:
@@ -15,8 +15,7 @@ def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float =
 
 
 class Metric(ABC):
-    def __init__(self, n_envs: int) -> None:
-        self.n_envs: int = n_envs
+    def __init__(self) -> None:
         self.reset()
 
     @abstractmethod
@@ -24,7 +23,7 @@ class Metric(ABC):
         pass
 
     @abstractmethod
-    def step(self, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
+    def step(self, obs: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
         pass
 
     @abstractmethod
@@ -38,15 +37,19 @@ class Metric(ABC):
 
 class RewardAndLengthMetric(Metric):
     def reset(self) -> None:
-        self.current_rewards = np.zeros(self.n_envs)
-        self.current_lengths = np.zeros(self.n_envs, dtype=int)
+        self.current_rewards = None
+        self.current_lengths = None
 
         self.episode_rewards = []
         self.episode_lengths = []
 
-    def step(self, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
-        self.current_rewards += rewards
-        self.current_lengths += 1
+    def step(self, obs: np.ndarray, rewards: np.ndarray, dones: np.ndarray, infos: List[Dict]) -> None:
+        self.current_rewards = (
+            np.zeros_like(rewards) if self.current_rewards is None else self.current_rewards + rewards
+        )
+        self.current_lengths = (
+            np.zeros_like(dones, dtype=np.uint32) if self.current_lengths is None else self.current_lengths + 1
+        )
 
     def on_episode_end(self, env_idx: int) -> None:
         self.episode_rewards.append(self.current_rewards[env_idx])
@@ -65,8 +68,8 @@ class RewardAndLengthMetric(Metric):
 
 
 class NormalizedRewardMetric(RewardAndLengthMetric):
-    def __init__(self, n_envs: int, ref_min_score: float, ref_max_score: float):
-        super().__init__(n_envs)
+    def __init__(self, ref_min_score: float, ref_max_score: float):
+        super().__init__()
         self.ref_min_score = ref_min_score
         self.ref_max_score = ref_max_score
 
@@ -86,19 +89,17 @@ class Evaluator:
     def __init__(
         self,
         envs: VectorEnv,
-        agent: td3_bc.BaseAgent,
         n_eval_episodes: int = 10,
         dataset_statistics_path: Optional[str] = None,
         render: bool = False,
         metric: Optional[Metric] = None,
     ) -> None:
         self.envs: VectorEnv = envs
-        self.agent: td3_bc.BaseAgent = agent
         self.n_eval_episodes: int = n_eval_episodes
         self.render: bool = render
 
         self.n_envs: int = self.envs.num_envs
-        self.metric: Metric = metric or RewardAndLengthMetric(self.n_envs)
+        self.metric: Metric = metric or RewardAndLengthMetric()
 
         self.obs_shape = envs.single_observation_space.shape
         self.action_dim = envs.single_action_space.shape[0]
@@ -120,7 +121,7 @@ class Evaluator:
         self.obs_mean = obs_mean
         self.obs_std = obs_std
 
-    def evaluate(self) -> Dict[str, float]:
+    def evaluate(self, agent: td3_bc.BaseAgent) -> Dict[str, float]:
         self.metric.reset()
         episode_counts = np.zeros(self.n_envs, dtype=int)
         episode_targets = np.array(
@@ -132,11 +133,11 @@ class Evaluator:
 
         while (episode_counts < episode_targets).any():
             obs = normalize(obs, self.obs_mean, self.obs_std)
-            actions = self.agent.select_action(obs)
+            actions = agent.select_action(obs)
             obs, rewards, terminated, truncated, infos = self.envs.step(actions)
 
             dones = np.logical_or(terminated, truncated)
-            self.metric.step(rewards, dones, infos)
+            self.metric.step(obs, rewards, dones, infos)
 
             for i in range(self.n_envs):
                 if dones[i] and episode_counts[i] < episode_targets[i]:
@@ -148,7 +149,7 @@ class Evaluator:
 
         self.envs.reset()
 
-        return self.metric.compute()
+        return self.metric.compute() if self.n_eval_episodes > 0 else {}
 
 
 if __name__ == "__main__":

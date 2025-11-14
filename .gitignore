@@ -18,3 +18,7 @@ wandb
 checkpoints
 
 misc
+
+# Apptainer
+*.sif
+*.tar

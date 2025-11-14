@@ -7,7 +7,7 @@ import minari
 import random
 from typing import Dict, Optional, Union, List, Tuple
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import draccus
 import gymnasium as gym
@@ -16,39 +16,54 @@ import numpy as np
 from tqdm import tqdm
 import wandb
 
-from td3_bc.buffer import ReplayBuffer
-import td3_bc.td3_bc as td3_bc
-from td3_bc.evaluator import Evaluator
+from dmc_env.wrappers import FrameStack
+from td3_bc.buffer import ReplayBufferState, ReplayBufferImage, ReplayBuffer
+import td3_bc.algorithms.td3_bc_vanilla as td3_bc
+import td3_bc.algorithms.td3_bc_ftd as td3_bc_ftd
+from td3_bc.evaluator import Evaluator, Metric, RewardAndLengthMetric
+import td3_bc.algorithms as algorithms
 
 
 @dataclass
 class ModeConfig(draccus.ChoiceRegistry):
     name: str
-    td3_config: td3_bc.TD3BC_Base_Config
+    td3_config: Union[
+        td3_bc.TD3BC_Config,
+        td3_bc.TD3BC_Refine_Config,
+        td3_bc.TD3BC_Online_Config,
+        td3_bc_ftd.TD3BC_FTD_Config,
+    ]
 
 
 @ModeConfig.register_subclass("pretrain")
 @dataclass
 class PretrainConfig(ModeConfig):
     name: str = "pretrain"
-    td3_config: td3_bc.TD3BC_Config = td3_bc.TD3BC_Config()
+    td3_config: td3_bc.TD3BC_Config = field(default_factory=td3_bc.TD3BC_Config)
 
 
 @ModeConfig.register_subclass("refine")
 @dataclass
 class RefineConfig(ModeConfig):
     name: str = "refine"
-    td3_config: td3_bc.TD3BC_Refine_Config = td3_bc.TD3BC_Refine_Config()
+    td3_config: td3_bc.TD3BC_Refine_Config = field(default_factory=td3_bc.TD3BC_Refine_Config)
 
 
 @ModeConfig.register_subclass("online")
 @dataclass
 class OnlineConfig(ModeConfig):
     name: str = "online"
-    td3_config: td3_bc.TD3BC_Online_Config = td3_bc.TD3BC_Online_Config()
+    td3_config: td3_bc.TD3BC_Online_Config = field(default_factory=td3_bc.TD3BC_Online_Config)
 
     warmup_steps: int = 5000
     expl_noise: float = 0.1
+
+
+@ModeConfig.register_subclass("pretrain_ftd")
+@dataclass
+class PretrainFTDConfig(ModeConfig):
+    name: str = "pretrain_ftd"
+    td3_config: td3_bc_ftd.TD3BC_FTD_Config = field(default_factory=td3_bc_ftd.TD3BC_FTD_Config)
 
 
 @dataclass
@@ -64,7 +79,7 @@ class TrainerConfig:
     debug: bool = False  # do not log to wandb
     resume: bool = False  # resume training
 
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     seeds: Union[List, int] = 0
     n_seeds: int = 1
@@ -81,6 +96,8 @@ class TrainerConfig:
 
     env_name: Optional[str] = None
     num_envs: Optional[int] = 1
+    env_kwargs: Dict = field(default_factory=dict)
+    frame_stack: int = 1
 
     @property
     def dataset_statistics_path(self) -> str:
@@ -161,14 +178,25 @@ def normalize(array: np.ndarray, mean: np.ndarray, std: np.ndarray, eps: float =
 
 
 class Trainer(ABC):
-    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None):
+    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None):
         self.cfg = cfg
         self.cfg.initialize_config()
 
         if envs:
             self.envs = envs
         elif cfg.env_name:
-            self.envs = gym.make_vec(self.cfg.env_name, num_envs=self.cfg.num_envs, vectorization_mode="sync")
+            if self.cfg.frame_stack > 1:
+                self.envs = gym.make_vec(
+                    self.cfg.env_name,
+                    num_envs=self.cfg.num_envs,
+                    vectorization_mode="sync",
+                    wrappers=[lambda env: FrameStack(env, k=self.cfg.frame_stack)],
+                    **self.cfg.env_kwargs,
+                )
+            else:
+                self.envs = gym.make_vec(
+                    self.cfg.env_name, num_envs=self.cfg.num_envs, vectorization_mode="sync", **self.cfg.env_kwargs
+                )
         else:
             raise ValueError("No environment specified.")
 
@@ -179,6 +207,7 @@ class Trainer(ABC):
         self.agent: td3_bc.TD3BC_Base = None
 
         self.evaluator: Evaluator = None
+        self.eval_metric = eval_metric or RewardAndLengthMetric()
 
         self.buffer: ReplayBuffer = None
 
@@ -208,13 +237,14 @@ class Trainer(ABC):
         self.envs.reset(seed=seed)
 
     def _load_agent(self, pretrain_dir: str, pretrain_checkpoint: int, seed: int):
-        self.agent = td3_bc.get_td3_bc_agent(
+        self.agent = algorithms.get_td3_bc_agent(
             obs_shape=self.obs_shape,
             action_dim=self.action_dim,
             max_action=self.max_action,
             train_steps=self.cfg.train_steps,
             cfg=self.cfg.train_mode.td3_config,
             device=self.cfg.device,
+            frame_stack=self.cfg.frame_stack,
         )
 
         pretrain_path = None
@@ -269,7 +299,7 @@ class Trainer(ABC):
 
         return pretrain_dir, pretrain_checkpoint, start_step, run_id
 
-    def train(self):
+    def train(self) -> Dict:
         for seed in self.cfg.seeds:
             pretrain_dir, pretrain_checkpoint, start_step, run_id = self._check_resume(seed)
             if run_id == "skip":
@@ -305,12 +335,14 @@ class Trainer(ABC):
             self.initialize_replay_buffer()
 
             self.evaluator = Evaluator(
-                self.envs,
-                self.agent,
+                envs=self.envs,
                 n_eval_episodes=self.cfg.eval_episodes,
                 dataset_statistics_path=self.cfg.dataset_statistics_path,
                 render=False,
+                metric=self.eval_metric,
             )
+
+            eval_metrics = {}
 
             for i in tqdm(
                 range(start_step, self.cfg.train_steps),
@@ -323,11 +355,18 @@ class Trainer(ABC):
 
                 run.log(metrics, step=i)
 
-                if (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0:
-                    eval_metrics = self.evaluator.evaluate()
+                if self.cfg.eval_freq > 0 and (
+                    (i + 1) % self.cfg.eval_freq == 0 or i == self.cfg.train_steps - 1 or i == 0
+                ):
+                    self.agent.eval()
+                    eval_metrics = self.evaluator.evaluate(self.agent)
+                    self.agent.train()
+
                     run.log(eval_metrics, step=i)
 
-                if (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1:
+                if self.cfg.checkpoint_freq > 0 and (
+                    (i + 1) % self.cfg.checkpoint_freq == 0 or i == self.cfg.train_steps - 1
+                ):
                     checkpoint_dir = os.path.join(self.cfg.checkpoint_mode_dir, f"seed_{seed}", f"checkpoint_{i + 1}")
                     os.makedirs(checkpoint_dir, exist_ok=True)
                     self.agent.save(checkpoint_dir)
@@ -338,10 +377,18 @@ class Trainer(ABC):
 
             run.finish()
 
+            return eval_metrics
+
 
 class OfflineTrainer(Trainer):
-    def __init__(self, cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None):
-        super().__init__(cfg, envs)
+    def __init__(
+        self,
+        cfg: TrainerConfig,
+        dataset: Optional[Dict] = None,
+        envs: Optional[VectorEnv] = None,
+        eval_metric: Optional[Metric] = None,
+    ):
+        super().__init__(cfg=cfg, envs=envs, eval_metric=eval_metric)
 
         self.dataset = dataset
 
@@ -354,18 +401,18 @@ class OfflineTrainer(Trainer):
                 raise NotImplementedError("load from file")
             else:
                 dataset = minari.load_dataset(self.cfg.dataset_path, download=True)
-                self.buffer.convert_minari(dataset)
+                self.buffer.load_minari(dataset)
                 logging.info(f"Replay buffer filled with transitions from Minari dataset at {self.cfg.dataset_path}.")
         else:
             raise ValueError(f"Dataset must be provided for offline training mode '{self.cfg.name}'.")
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
+        self.buffer = ReplayBufferImage(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
+
         self._fill_replay_buffer()
 
         obs_mean, obs_std = self.buffer.compute_dataset_statistics()
         self.buffer.set_dataset_statistics(obs_mean=obs_mean, obs_std=obs_std)
-
         self.buffer.save_statistics(self.cfg.dataset_statistics_path)
 
         logging.info(f"Observations normalized and dataset statistics saved to {self.cfg.experiment_dir}")
@@ -375,8 +422,8 @@ class OfflineTrainer(Trainer):
 
 
 class OnlineTrainer(Trainer):
-    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None):
-        super().__init__(cfg, envs)
+    def __init__(self, cfg: TrainerConfig, envs: Optional[VectorEnv] = None, eval_metric: Optional[Metric] = None):
+        super().__init__(cfg=cfg, envs=envs, eval_metric=eval_metric)
 
         self.obs = np.zeros((self.envs.num_envs, self.obs_shape))
         self.episode_starts = np.ones(self.envs.num_envs, dtype=np.bool)
@@ -417,7 +464,7 @@ class OnlineTrainer(Trainer):
         self.episode_starts = np.zeros(n_envs, dtype=np.bool)
 
     def initialize_replay_buffer(self):
-        self.buffer = ReplayBuffer(obs_shape=self.obs_shape, action_dim=self.action_dim, device=self.cfg.device)
+        self.buffer = ReplayBufferImage(obs_shape=self.obs_shape, action_dim=self.action_dim, frame_stack=self.cfg.frame_stack, device=self.cfg.device)
 
         if self.cfg.pretrain_dir.endswith("/"):
             self.cfg.pretrain_dir = self.cfg.pretrain_dir[:-1]
@@ -443,14 +490,24 @@ class OnlineTrainer(Trainer):
         return self.buffer.sample(batch_size)
 
 
-def get_trainer(cfg: TrainerConfig, dataset: Optional[Dict] = None, envs: Optional[VectorEnv] = None) -> Trainer:
-    trainer_map = {"pretrain": OfflineTrainer, "refine": OfflineTrainer, "online": OnlineTrainer}
+def get_trainer(
+    cfg: TrainerConfig,
+    dataset: Optional[Dict] = None,
+    envs: Optional[VectorEnv] = None,
+    eval_metric: Optional[Metric] = None,
+) -> Trainer:
+    trainer_map = {
+        "pretrain": OfflineTrainer,
+        "refine": OfflineTrainer,
+        "online": OnlineTrainer,
+        "pretrain_ftd": OfflineTrainer,
+    }
     if cfg.train_mode.name not in trainer_map:
         raise ValueError(f"Unknown training mode: {cfg.train_mode.name}")
     return (
-        trainer_map[cfg.train_mode.name](cfg, dataset, envs)
+        trainer_map[cfg.train_mode.name](cfg, dataset, envs, eval_metric)
         if cfg.train_mode.name != "online"
-        else trainer_map[cfg.train_mode.name](cfg, envs)
+        else trainer_map[cfg.train_mode.name](cfg, envs, eval_metric)
     )
 
 

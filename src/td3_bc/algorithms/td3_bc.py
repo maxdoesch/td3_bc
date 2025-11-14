@@ -1,0 +1,194 @@
+import os
+import copy
+import numpy as np
+import logging
+from dataclasses import dataclass
+from abc import ABC, abstractmethod
+from typing import Dict, Optional, Tuple, Union
+
+import torch
+from torch.nn import functional
+
+import td3_bc.policies as policies
+
+
+@dataclass
+class TD3BC_Base_Config:
+    policy_config: policies.PolicyConfig
+
+    discount: float = 0.99
+    tau: float = 0.005
+    policy_noise: float = 0.2
+    noise_clip: float = 0.5
+    alpha: float = 0.4
+
+    actor_lr: float = 3e-4
+    critic_lr: float = 3e-4
+
+
+class BaseAgent(ABC):
+    @abstractmethod
+    def select_action(self, obs: np.ndarray) -> np.ndarray:
+        pass
+
+
+class DummyAgent(BaseAgent):
+    def __init__(self, obs_shape: Union[int, Tuple[int, ...]], action_dim: int, max_action: float):
+        self.obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
+        self.action_dim = action_dim
+        self.max_action = max_action
+
+    def select_action(self, obs):
+        return np.random.randn(obs.shape[0], self.action_dim) * self.max_action
+
+
+class TD3BC_Base(BaseAgent):
+    def __init__(
+        self,
+        obs_shape: Union[int, Tuple[int, ...]],
+        action_dim: int,
+        max_action: float,
+        cfg: Optional[TD3BC_Base_Config] = None,
+        device: Optional[str] = None,
+    ):
+        if cfg is None:
+            cfg = TD3BC_Base_Config()
+
+        if device is None:
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        self.device = device
+
+        obs_shape = (obs_shape,) if isinstance(obs_shape, int) else obs_shape
+
+        self.actor, self.critic = policies.get_policy(
+            obs_shape=obs_shape,
+            action_dim=action_dim,
+            max_action=max_action,
+            device=self.device,
+            cfg=cfg.policy_config,
+        )
+        self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
+        for m in (self.actor_target, self.critic_target):
+            for p in m.parameters():
+                p.requires_grad = False
+            m.eval()
+
+        self.actor_optimizer = torch.optim.Adam(
+            list(self.actor.actor_loss_parameters) + list(self.critic.actor_loss_parameters), lr=cfg.actor_lr
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            list(self.critic.critic_loss_parameters) + list(self.actor.critic_loss_parameters), lr=cfg.critic_lr
+        )
+
+        self.actor.train()
+        self.critic.train()
+
+        self.max_action = max_action
+        self.discount = cfg.discount
+        self.tau = cfg.tau
+        self.policy_noise = cfg.policy_noise * self.max_action
+        self.noise_clip = cfg.noise_clip * self.max_action
+        self.alpha = cfg.alpha
+
+    @torch.inference_mode
+    def select_action(self, obs: np.ndarray) -> np.ndarray:
+        obs = torch.tensor(obs, dtype=torch.float32).to(self.device)
+        action = self.actor(obs).cpu().numpy()
+        return action
+
+    @abstractmethod
+    def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float | np.ndarray]:
+        pass
+
+    def update_critic(
+        self,
+        obs: torch.Tensor,
+        action: torch.Tensor,
+        next_obs: torch.Tensor,
+        reward: torch.Tensor,
+        not_done: torch.Tensor,
+    ) -> Tuple[float, float, float]:
+        with torch.no_grad():
+            # Select action according to policy and add clipped noise
+            noise = (torch.randn_like(action) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
+            next_action = (self.actor_target(next_obs) + noise).clamp(-self.max_action, self.max_action)
+
+            # Compute the target Q value
+            target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
+            target_Q = torch.min(target_Q1, target_Q2)
+            target_Q = reward + not_done * self.discount * target_Q
+
+        # Get current Q estimates
+        current_Q1, current_Q2 = self.critic(obs, action)
+
+        # Compute critic loss
+        critic_loss = functional.mse_loss(current_Q1, target_Q) + functional.mse_loss(current_Q2, target_Q)
+
+        # Optimize the critic
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
+
+        return critic_loss.item(), current_Q1.mean().item(), current_Q2.mean().item()
+
+    def update_actor(self, obs: torch.Tensor, action: torch.Tensor) -> Tuple[np.ndarray, float, float, float]:
+        # Compute actor loss
+        pi = self.actor(obs)
+        q1_value = self.critic.q1(obs, pi)
+        q1_value_norm = q1_value / (q1_value.abs().mean().detach() + 1e-9)
+
+        bc_loss = functional.mse_loss(pi, action)
+        actor_loss = -q1_value_norm.mean() + self.alpha * bc_loss
+
+        # Optimize the actor
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        return pi.detach().cpu().numpy(), actor_loss.item(), bc_loss.item(), q1_value.mean().item()
+
+    @torch.no_grad()
+    def update_actor_target(self):
+        for p, tp in zip(self.actor.parameters(), self.actor_target.parameters()):
+            tp.mul_(1 - self.tau).add_(self.tau * p)
+
+    @torch.no_grad()
+    def update_critic_target(self):
+        for p, tp in zip(self.critic.parameters(), self.critic_target.parameters()):
+            tp.mul_(1 - self.tau).add_(self.tau * p)
+
+    def save(self, dir_path: str):
+        file_path = os.path.join(dir_path, "td3_bc.pt")
+        torch.save(
+            {
+                "critic_state_dict": self.critic.state_dict(),
+                "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+                "actor_state_dict": self.actor.state_dict(),
+                "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+            },
+            file_path,
+        )
+
+        logging.debug(f"Model parameters saved to: {file_path}.")
+
+    def load(self, dir_path: str):
+        file_path = os.path.join(dir_path, "td3_bc.pt")
+        checkpoint = torch.load(file_path)
+
+        self.critic.load_state_dict(checkpoint["critic_state_dict"])
+        self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
+        self.critic_target = copy.deepcopy(self.critic)
+
+        self.actor.load_state_dict(checkpoint["actor_state_dict"])
+        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
+        self.actor_target = copy.deepcopy(self.actor)
+
+        logging.debug(f"Model parameters loaded from: {file_path}.")
+
+    def train(self):
+        self.actor.train()
+        self.critic.train()
+
+    def eval(self):
+        self.actor.eval()
+        self.critic.eval()

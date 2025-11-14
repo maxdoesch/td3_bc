@@ -1,0 +1,322 @@
+import os
+import copy
+import time
+import wandb
+import logging
+from dataclasses import dataclass, field
+from typing import Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+import td3_bc.policies as policies
+from .td3_bc import TD3BC_Base, TD3BC_Base_Config
+
+
+@dataclass
+class TD3BC_FTD_Config(TD3BC_Base_Config):
+    policy_config: policies.PolicyConfig = field(default_factory=policies.FtdPolicyConfig)
+
+    predictor_hidden_dim: int = 1024  # Hidden dimension for auxiliary predictors
+    reward_factor: float = 1.0  # Scaling factor for the reward prediction loss
+    inverse_factor: float = 1.0  # Scaling factor for the inverse dynamics prediction loss
+    max_grad_norm: float = 5.0  # Maximum gradient norm for clipping predictor gradients, 0 means no clipping
+    predictors_lr: float = 1e-4  # Learning rate for the auxiliary predictors
+
+    # Update frequencies:
+    policy_freq: int = 2  # Frequency of actor updates
+    predictors_update_freq: int = 1  # Frequency of auxiliary predictors updates
+    predictors_update_slow_freq: int = 50_000  # Frequency of slow updates for auxiliary predictors
+    predictors_warmup_steps: int = 10_000  # Number of warmup steps before updating auxiliary predictors
+
+    log_img_freq: int = 500  # Frequency of logging images to wandb
+
+
+def weight_init(m):
+    """Custom weight init for Conv2D and Linear layers"""
+    if isinstance(m, nn.Linear):
+        nn.init.orthogonal_(m.weight.data)
+        if hasattr(m.bias, "data"):
+            m.bias.data.fill_(0.0)
+    elif isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+        # delta-orthogonal init from https://arxiv.org/pdf/1806.05393.pdf
+        assert m.weight.size(2) == m.weight.size(3)
+        m.weight.data.fill_(0.0)
+        if hasattr(m.bias, "data"):
+            m.bias.data.fill_(0.0)
+        mid = m.weight.size(2) // 2
+        gain = nn.init.calculate_gain("relu")
+        nn.init.orthogonal_(m.weight.data[:, :, mid, mid], gain)
+
+
+class RewardPredictor(nn.Module):
+    def __init__(self, encoder, action_dim, hidden_dim):
+        super().__init__()
+
+        self.encoder = encoder
+        self.mlp = nn.Sequential(
+            nn.Linear(self.encoder.output_dim + action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1),
+        )
+
+        self.mlp.apply(weight_init)
+
+    def forward(self, x, action):
+        x = self.encoder(x)
+        x = torch.cat([x, action], dim=1)
+        x = self.mlp(x)
+
+        return x
+
+
+class InverseDynamicPredictor(nn.Module):
+    def __init__(self, encoder, action_dim, hidden_dim):
+        super().__init__()
+
+        self.encoder = encoder
+        self.mlp = nn.Sequential(
+            nn.Linear(self.encoder.output_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, action_dim),
+        )
+
+        self.mlp.apply(weight_init)
+
+    def forward(self, x, next_x):
+        x = self.encoder(x)
+        next_x = self.encoder(next_x)
+
+        x = torch.cat((x, next_x), dim=1)
+        x = self.mlp(x)
+
+        return x
+
+
+class TD3BC_FTD(TD3BC_Base):
+    def __init__(
+        self,
+        obs_shape: tuple[int, int, int],
+        action_dim: int,
+        max_action: float,
+        cfg: Optional[TD3BC_FTD_Config] = None,
+        device: str | None = None,
+        **policy_kwargs,
+    ):
+        if cfg is None:
+            cfg = TD3BC_FTD_Config()
+
+        if device is None:
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        self.device = device
+
+        self.total_it = 0
+
+        # === Configuration ===
+        self.reward_factor = cfg.reward_factor
+        self.inverse_factor = cfg.inverse_factor
+        self.max_grad_norm = cfg.max_grad_norm
+
+        self.predictors_update_freq = cfg.predictors_update_freq
+        self.predictors_update_slow_freq = cfg.predictors_update_slow_freq
+        self.predictors_warmup_steps = cfg.predictors_warmup_steps
+
+        self.max_action = max_action
+        self.discount = cfg.discount
+        self.tau = cfg.tau
+        self.policy_noise = cfg.policy_noise * self.max_action
+        self.noise_clip = cfg.noise_clip * self.max_action
+        self.alpha = cfg.alpha
+        self.policy_freq = cfg.policy_freq
+
+        self.log_img_freq = cfg.log_img_freq
+
+        # === Layers ===
+
+        self.actor, self.critic = policies.get_policy(
+            obs_shape, action_dim, max_action, self.device, cfg.policy_config, **policy_kwargs
+        )
+        self.actor_target, self.critic_target = copy.deepcopy(self.actor), copy.deepcopy(self.critic)
+        for m in (self.actor_target, self.critic_target):
+            for p in m.parameters():
+                p.requires_grad = False
+            m.eval()
+
+        # === Auxiliary Predictors ===
+
+        self.reward_predictor = RewardPredictor(self.critic.encoder, action_dim, cfg.predictor_hidden_dim).to(
+            self.device
+        )
+
+        self.inverse_dynamic_predictor = InverseDynamicPredictor(
+            self.critic.encoder, action_dim, cfg.predictor_hidden_dim
+        ).to(self.device)
+
+        # === Optimizers ===
+
+        self.actor_optimizer = torch.optim.Adam(
+            list(self.actor.actor_loss_parameters) + list(self.critic.actor_loss_parameters), lr=cfg.actor_lr
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            list(self.critic.critic_loss_parameters) + list(self.actor.critic_loss_parameters), lr=cfg.critic_lr
+        )
+        self.reward_predictor_optimizer = torch.optim.Adam(self.reward_predictor.parameters(), lr=cfg.predictors_lr)
+        self.inverse_dynamic_predictor_optimizer = torch.optim.Adam(
+            self.inverse_dynamic_predictor.parameters(), lr=cfg.predictors_lr
+        )
+
+    def update_reward_predictor(self, obs, action, reward):
+        """
+        Update the reward predictor using the MSE loss between the predicted and actual rewards.
+        :param obs: Observations of shape (batch_size, num_stack * (num_regions + 1) * num_channels, height, width).
+        :param action: Actions of shape (batch_size, action_dim).
+        :param reward: Actual rewards of shape (batch_size, 1).
+        """
+        predicted_reward = self.reward_predictor(obs, action)  # Shape: (batch_size, 1)
+        predict_loss = self.reward_factor * F.mse_loss(reward, predicted_reward)
+
+        self.reward_predictor_optimizer.zero_grad()
+        predict_loss.backward()
+        if self.max_grad_norm != 0.0:
+            torch.nn.utils.clip_grad_norm_(self.reward_predictor.parameters(), self.max_grad_norm)
+        self.reward_predictor_optimizer.step()
+
+        return predict_loss.item()
+
+    def update_inverse_dynamic_predictor(self, obs, action, next_obs):
+        """
+        Update the inverse dynamic predictor using the MSE loss between the predicted and actual actions.
+        :param obs: Current observations of shape (batch_size, num_stack * (num_regions + 1) * num_channels, height, width).
+        :param next_obs: Next observations of shape (batch_size, num_stack * (num_regions + 1) * num_channels, height, width).
+        :param action: Actions of shape (batch_size, action_dim).
+        """
+        predicted_action = self.inverse_dynamic_predictor(obs, next_obs)  # Shape: (batch_size, action_dim)
+        predict_loss = self.inverse_factor * F.mse_loss(action, predicted_action)
+
+        self.inverse_dynamic_predictor_optimizer.zero_grad()
+        predict_loss.backward()
+        if self.max_grad_norm != 0.0:
+            torch.nn.utils.clip_grad_norm_(self.inverse_dynamic_predictor.parameters(), self.max_grad_norm)
+        self.inverse_dynamic_predictor_optimizer.step()
+
+        return predict_loss.item()
+
+    def save(self, dir_path: str):
+        file_path = os.path.join(dir_path, "td3_bc_ftd.pt")
+        torch.save(
+            {
+                "actor_state_dict": self.actor.state_dict(),
+                "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+                "critic_state_dict": self.critic.state_dict(),
+                "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+                "reward_predictor_state_dict": self.reward_predictor.state_dict(),
+                "reward_predictor_optimizer_state_dict": self.reward_predictor_optimizer.state_dict(),
+                "inverse_dynamic_predictor_state_dict": self.inverse_dynamic_predictor.state_dict(),
+                "inverse_dynamic_predictor_optimizer_state_dict": self.inverse_dynamic_predictor_optimizer.state_dict(),
+                "predictors_update_freq": self.predictors_update_freq,
+            },
+            file_path,
+        )
+
+        logging.debug(f"Model parameters saved to: {file_path}.")
+
+    def load(self, dir_path: str):
+        file_path = os.path.join(dir_path, "td3_bc_ftd.pt")
+        checkpoint = torch.load(file_path)
+
+        self.actor.load_state_dict(checkpoint["actor_state_dict"])
+        self.actor_optimizer.load_state_dict(checkpoint["actor_optimizer_state_dict"])
+        self.actor_target = copy.deepcopy(self.actor)
+
+        self.critic.load_state_dict(checkpoint["critic_state_dict"])
+        self.critic_optimizer.load_state_dict(checkpoint["critic_optimizer_state_dict"])
+        self.critic_target = copy.deepcopy(self.critic)
+
+        self.reward_predictor.load_state_dict(checkpoint["reward_predictor_state_dict"])
+        self.reward_predictor_optimizer.load_state_dict(checkpoint["reward_predictor_optimizer_state_dict"])
+
+        self.inverse_dynamic_predictor.load_state_dict(checkpoint["inverse_dynamic_predictor_state_dict"])
+        self.inverse_dynamic_predictor_optimizer.load_state_dict(
+            checkpoint["inverse_dynamic_predictor_optimizer_state_dict"]
+        )
+
+        self.predictors_update_freq = checkpoint["predictors_update_freq"]
+
+        logging.debug(f"Model parameters loaded from: {file_path}.")
+
+    def train_step(self, batch: dict[str, torch.Tensor]) -> dict[str, float | np.ndarray]:
+        metrics = {}
+        start_time = time.time()
+        self.total_it += 1
+
+        # Slow down the update frequency of the predictors
+        if (
+            self.predictors_update_freq != 0
+            and self.total_it > self.predictors_warmup_steps
+            and self.total_it % self.predictors_update_slow_freq == 0
+        ):
+            self.predictors_update_freq += 1
+            metrics["train/predictors_update_freq"] = self.predictors_update_freq
+
+        # Update critic
+        critic_loss, avg_q1, avg_q2 = self.update_critic(**batch)
+
+        metrics["train/critic_loss"] = critic_loss
+        metrics["train/avg_q1"] = avg_q1
+        metrics["train/avg_q2"] = avg_q2
+
+        # Update actor
+        if self.total_it % self.policy_freq == 0:
+            actions_taken, actor_loss, bc_loss, _ = self.update_actor(batch["obs"], batch["action"])
+
+            metrics["train/actor_loss"] = actor_loss
+            metrics["train/bc_loss"] = bc_loss
+            metrics["train/actions_taken"] = actions_taken
+
+            # Update the frozen target models
+            self.update_critic_target()
+            self.update_actor_target()
+
+        # Update auxiliary predictors
+        if (
+            self.predictors_update_freq != 0
+            and self.total_it > self.predictors_warmup_steps
+            and self.total_it % self.predictors_update_freq == 0
+        ):
+            if self.reward_factor != 0.0:
+                reward_predictor_loss = self.update_reward_predictor(batch["obs"], batch["action"], batch["reward"])
+                metrics["train/reward_predictor_loss"] = reward_predictor_loss
+
+            if self.inverse_factor != 0.0:
+                inverse_dynamic_loss = self.update_inverse_dynamic_predictor(
+                    batch["obs"], batch["action"], batch["next_obs"]
+                )
+                metrics["train/inverse_dynamic_loss"] = inverse_dynamic_loss
+
+        if self.log_img_freq != 0 and self.total_it % self.log_img_freq == 0:
+            # batch['obs'][0] can be (C, H, W) or (R, C, H, W) or (F, C, H, W) or (F, R, C, H, W) flatten such that it results in (_, H, W)
+            obs = batch["obs"].flatten(start_dim=1, end_dim=-3)[0]
+            metrics["train/raw_images"] = wandb.Image(obs[-3:])
+            metrics["train/ftd_images"] = wandb.Image(self.actor.encoder.select_image(obs))
+
+        metrics["train/time"] = time.time() - start_time
+
+        return metrics
+
+    def train(self):
+        self.inverse_dynamic_predictor.train()
+        self.reward_predictor.train()
+
+        return super().train()
+
+    def eval(self):
+        self.inverse_dynamic_predictor.eval()
+        self.reward_predictor.eval()
+
+        return super().eval()
